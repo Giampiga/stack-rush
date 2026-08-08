@@ -22,6 +22,8 @@ console.log("QA Rival is ready");
 
 const startedAt = Date.now();
 const targetName = process.env.QA_TARGET_NAME;
+const challengeMode = process.env.QA_MODE ?? "sort";
+const challengeTier = process.env.QA_TIER ?? (challengeMode === "hanoi" ? "master" : "endurance");
 let challenged = false;
 while (Date.now() - startedAt < 90_000) {
   const snapshot = await post("sync");
@@ -37,7 +39,7 @@ while (Date.now() - startedAt < 90_000) {
       (player) => player.name === targetName && player.available,
     );
     if (target) {
-      await post("challenge", { playerId: target.id, tier: "endurance" });
+      await post("challenge", { playerId: target.id, mode: challengeMode, tier: challengeTier });
       challenged = true;
       console.log(`Challenge sent to ${targetName}`);
     }

@@ -23,6 +23,7 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY NOT NULL,
     from_player_id TEXT NOT NULL,
     to_player_id TEXT NOT NULL,
+    game_mode TEXT DEFAULT 'sort' NOT NULL,
     disk_count INTEGER NOT NULL,
     status TEXT DEFAULT 'pending' NOT NULL,
     created_at INTEGER NOT NULL,
@@ -44,6 +45,7 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY NOT NULL,
     player_one_id TEXT NOT NULL,
     player_two_id TEXT NOT NULL,
+    game_mode TEXT DEFAULT 'sort' NOT NULL,
     disk_count INTEGER NOT NULL,
     status TEXT DEFAULT 'countdown' NOT NULL,
     starts_at INTEGER NOT NULL,
@@ -89,16 +91,16 @@ const SCHEMA_STATEMENTS = [
 ];
 
 const BOLT_SORT_MIGRATION = "0001_bolt_sort_state_and_result_ledger";
+const DUAL_MODE_MIGRATION = "0002_dual_game_modes";
 
 async function applyMigrations(database: D1Database): Promise<void> {
   const applied = await database
     .prepare("SELECT id FROM schema_migrations WHERE id = ?")
     .bind(BOLT_SORT_MIGRATION)
     .first<{ id: string }>();
-  if (applied) return;
-
-  const now = Date.now();
-  await database.batch([
+  if (!applied) {
+    const now = Date.now();
+    await database.batch([
     // Earlier development builds created this trigger dynamically. Removing it
     // makes result accounting compatible with both the old application update
     // path and the transaction-local match_results ledger.
@@ -137,7 +139,27 @@ async function applyMigrations(database: D1Database): Promise<void> {
         "INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)",
       )
       .bind(BOLT_SORT_MIGRATION, now),
-  ]);
+    ]);
+  }
+
+  const dualModeApplied = await database
+    .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+    .bind(DUAL_MODE_MIGRATION)
+    .first<{ id: string }>();
+  if (dualModeApplied) return;
+
+  const inviteColumns = await database.prepare("PRAGMA table_info(invites)").all<{ name: string }>();
+  const matchColumns = await database.prepare("PRAGMA table_info(matches)").all<{ name: string }>();
+  if (!inviteColumns.results.some((column) => column.name === "game_mode")) {
+    await database.prepare("ALTER TABLE invites ADD COLUMN game_mode TEXT DEFAULT 'sort' NOT NULL").run();
+  }
+  if (!matchColumns.results.some((column) => column.name === "game_mode")) {
+    await database.prepare("ALTER TABLE matches ADD COLUMN game_mode TEXT DEFAULT 'sort' NOT NULL").run();
+  }
+  await database
+    .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+    .bind(DUAL_MODE_MIGRATION, Date.now())
+    .run();
 }
 
 let readyForDatabase: D1Database | null = null;

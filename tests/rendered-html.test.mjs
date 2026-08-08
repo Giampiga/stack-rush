@@ -20,7 +20,7 @@ test("server-renders the Peg Rush product shell and metadata", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>Peg Rush — Multiplayer Color-Sort Race<\/title>/i);
+  assert.match(html, /<title>Peg Rush — Live Multiplayer Puzzle Races<\/title>/i);
   assert.match(html, /PEG RUSH/);
   assert.match(html, /ENTERING THE LOUNGE/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Starter Project/i);

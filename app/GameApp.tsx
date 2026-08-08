@@ -15,6 +15,15 @@ import {
   type BoltSortBoard,
   type BoltSortTierId,
 } from "@/lib/bolt-sort";
+import {
+  HANOI_LEVELS,
+  hanoiProgress,
+  moveHanoiDisk,
+  type HanoiBoard,
+  type HanoiTierId,
+} from "@/lib/hanoi";
+
+type GameMode = "sort" | "hanoi";
 
 type Player = {
   id: string;
@@ -28,28 +37,47 @@ type OnlinePlayer = Player & { available: boolean };
 
 type Invite = {
   id: string;
-  tier: BoltSortTierId;
-  colorCount: number;
+  mode: GameMode;
+  tier: BoltSortTierId | HanoiTierId;
+  colorCount: number | null;
+  diskCount: number | null;
   createdAt: number;
   player: Player;
 };
 
-type Match = {
+type MatchBase = {
   id: string;
-  tier: BoltSortTierId;
   status: "countdown" | "playing" | "finished" | "abandoned";
-  colorCount: number;
   startsAt: number;
   finishedAt: number | null;
   winnerId: string | null;
-  myBoard: BoltSortBoard;
-  opponentBoard: BoltSortBoard;
   myMoves: number;
   opponentMoves: number;
   myRematch: boolean;
   opponentRematch: boolean;
   opponent: Player & { online: boolean };
 };
+
+type SortMatch = MatchBase & {
+  mode: "sort";
+  tier: BoltSortTierId;
+  colorCount: number;
+  diskCount: null;
+  myBoard: BoltSortBoard;
+  opponentBoard: BoltSortBoard;
+};
+
+type HanoiMatch = MatchBase & {
+  mode: "hanoi";
+  tier: HanoiTierId;
+  colorCount: null;
+  diskCount: number;
+  par: number;
+  myBoard: HanoiBoard;
+  opponentBoard: HanoiBoard;
+};
+
+type Match = SortMatch | HanoiMatch;
 
 type Snapshot = {
   serverNow: number;
@@ -230,14 +258,31 @@ function recordLabel(player: Player) {
   return `${player.wins} win${player.wins === 1 ? "" : "s"} · ${player.races} races`;
 }
 
+function ModePicker({ value, onChange }: { value: GameMode; onChange: (value: GameMode) => void }) {
+  return (
+    <div className="mode-picker" role="radiogroup" aria-label="Puzzle mode">
+      <button type="button" role="radio" aria-checked={value === "sort"} className={value === "sort" ? "active" : ""} onClick={() => onChange("sort")}>
+        <span aria-hidden="true">⬢</span><b>NUT SORT</b><small>COLOR STACKS</small>
+      </button>
+      <button type="button" role="radio" aria-checked={value === "hanoi"} className={value === "hanoi" ? "active" : ""} onClick={() => onChange("hanoi")}>
+        <span aria-hidden="true">≋</span><b>TOWER RACE</b><small>HANOI RINGS</small>
+      </button>
+    </div>
+  );
+}
+
 function DifficultyPicker({
+  mode,
   value,
   onChange,
 }: {
-  value: BoltSortTierId;
-  onChange: (value: BoltSortTierId) => void;
+  mode: GameMode;
+  value: BoltSortTierId | HanoiTierId;
+  onChange: (value: BoltSortTierId | HanoiTierId) => void;
 }) {
-  const levels = Object.values(BOLT_SORT_TIERS);
+  const levels = mode === "sort"
+    ? Object.values(BOLT_SORT_TIERS).map((level) => ({ id: level.id, label: level.label, count: level.colorCount, detail: `${level.colorCount + 2} BOLTS` }))
+    : (Object.entries(HANOI_LEVELS) as Array<[HanoiTierId, (typeof HANOI_LEVELS)[HanoiTierId]]>).map(([id, level]) => ({ id, label: level.label, count: level.diskCount, detail: `PAR ${level.par}` }));
   return (
     <div className="difficulty" role="radiogroup" aria-label="Race difficulty">
       {levels.map((level) => (
@@ -249,9 +294,9 @@ function DifficultyPicker({
           className={value === level.id ? "active" : ""}
           onClick={() => onChange(level.id)}
         >
-          <strong>{level.colorCount}</strong>
+          <strong>{level.count}</strong>
           <span>{level.label.toUpperCase()}</span>
-          <small>{level.colorCount + 2} BOLTS</small>
+          <small>{level.detail}</small>
         </button>
       ))}
     </div>
@@ -298,6 +343,8 @@ function OpponentCard({
 
 function Lobby({
   snapshot,
+  mode,
+  setMode,
   difficulty,
   setDifficulty,
   busy,
@@ -307,8 +354,10 @@ function Lobby({
   onToast,
 }: {
   snapshot: Snapshot;
-  difficulty: BoltSortTierId;
-  setDifficulty: (value: BoltSortTierId) => void;
+  mode: GameMode;
+  setMode: (value: GameMode) => void;
+  difficulty: BoltSortTierId | HanoiTierId;
+  setDifficulty: (value: BoltSortTierId | HanoiTierId) => void;
   busy: boolean;
   onChallenge: (playerId: string) => void;
   onCancel: (inviteId: string) => void;
@@ -321,7 +370,7 @@ function Lobby({
   const shareLounge = async () => {
     const shareData = {
       title: "Peg Rush",
-      text: "Race me in a live color-sort sprint—no account needed.",
+      text: "Race me in a live puzzle sprint—no account needed.",
       url: window.location.href,
     };
     try {
@@ -370,7 +419,7 @@ function Lobby({
             <em>RACE THE PUZZLE.</em>
           </h1>
           <p>
-            Same scramble. Same countdown. First to sort every color takes the win.
+            Same puzzle. Same countdown. First to finish takes the win.
           </p>
         </div>
         <button type="button" className="share-button" onClick={shareLounge}>
@@ -382,12 +431,13 @@ function Lobby({
         <section className="lounge-panel">
           <div className="section-heading">
             <div>
-              <span className="section-kicker">01 · CHOOSE YOUR RACE</span>
-              <h2>HOW MANY COLORS?</h2>
+              <span className="section-kicker">01 · CHOOSE YOUR GAME</span>
+              <h2>{mode === "sort" ? "SORT THE NUTS" : "MOVE THE TOWER"}</h2>
             </div>
-            <span className="par-note">MORE COLORS = BIGGER SCRAMBLE</span>
+            <span className="par-note">{mode === "sort" ? "MORE COLORS = BIGGER SCRAMBLE" : "MORE RINGS = LONGER RACE"}</span>
           </div>
-          <DifficultyPicker value={difficulty} onChange={setDifficulty} />
+          <ModePicker value={mode} onChange={setMode} />
+          <DifficultyPicker mode={mode} value={difficulty} onChange={setDifficulty} />
 
           <div className="rivals-heading">
             <div>
@@ -409,7 +459,7 @@ function Lobby({
               <div>
                 <strong>CHALLENGE SENT</strong>
                 <span>
-                  Waiting for {outgoing.player.name} · {outgoing.colorCount} colors
+                  Waiting for {outgoing.player.name} · {outgoing.mode === "sort" ? `${outgoing.colorCount} colors` : `${outgoing.diskCount} rings`}
                 </span>
               </div>
               <button
@@ -477,9 +527,9 @@ function Lobby({
 
           <div className="how-card">
             <span className="section-kicker">HOW TO PLAY</span>
-            <h2>STACK SMART.<br />MOVE FAST.</h2>
+            <h2>{mode === "sort" ? <>STACK SMART.<br />MOVE FAST.</> : <>THINK AHEAD.<br />MOVE FAST.</>}</h2>
             <ol>
-              <li>
+              {mode === "sort" ? <><li>
                 <span>1</span>
                 <p><b>TAP</b> a bolt to lift its top nut.</p>
               </li>
@@ -490,7 +540,7 @@ function Lobby({
               <li>
                 <span>3</span>
                 <p><b>SORT</b> four of every color before your rival.</p>
-              </li>
+              </li></> : <><li><span>1</span><p><b>TAP</b> a tower to lift its top ring.</p></li><li><span>2</span><p><b>PLACE</b> it on an empty peg or a larger ring.</p></li><li><span>3</span><p><b>BUILD</b> the full tower on peg three first.</p></li></>}
             </ol>
             <div className="rule-stamp">
               <UiIcon name="zap" /> NO HINTS. NO PAUSES. PURE RACE.
@@ -647,9 +697,9 @@ function RaceResultDialog({
         <span className="result-icon">
           {won ? <UiIcon name="trophy" /> : <UiIcon name="swords" />}
         </span>
-        <span className="result-kicker">{won ? "SORT SECURED" : "RACE COMPLETE"}</span>
+        <span className="result-kicker">{won ? (match.mode === "sort" ? "SORT SECURED" : "TOWER SECURED") : "RACE COMPLETE"}</span>
         <h2 id="result-title">
-          {won ? "YOU SORTED IT!" : `${match.opponent.name} GOT THERE FIRST`}
+          {won ? (match.mode === "sort" ? "YOU SORTED IT!" : "YOU BUILT IT!") : `${match.opponent.name} GOT THERE FIRST`}
         </h2>
         <p>
           {won
@@ -707,7 +757,75 @@ function RaceResultDialog({
   );
 }
 
-function Race({
+function HanoiBoardView({
+  board,
+  diskCount,
+  selectedPeg,
+  invalidPeg = null,
+  interactive,
+  onPeg,
+  mini = false,
+}: {
+  board: HanoiBoard;
+  diskCount: number;
+  selectedPeg: number | null;
+  invalidPeg?: number | null;
+  interactive: boolean;
+  onPeg?: (peg: number) => void;
+  mini?: boolean;
+}) {
+  return (
+    <div className={`hanoi-board${mini ? " mini-hanoi-board" : ""}`} role={mini ? undefined : "group"} aria-label={mini ? undefined : `${diskCount}-ring Tower of Hanoi board`} aria-hidden={mini || undefined}>
+      {board.map((peg, pegIndex) => {
+        const contents = <><span className="hanoi-rod" /><span className="ring-stack">{peg.map((disk, index) => <span key={disk} className={`hanoi-ring ring-${disk}${selectedPeg === pegIndex && index === peg.length - 1 ? " lifted" : ""}`} style={{ width: `${32 + (disk / diskCount) * 64}%` }}><i>{disk}</i></span>)}</span><span className="hanoi-base" /></>;
+        if (mini) return <span key={pegIndex} className="hanoi-peg">{contents}</span>;
+        return <button key={pegIndex} type="button" className={`hanoi-peg${selectedPeg === pegIndex ? " selected" : ""}${invalidPeg === pegIndex ? " invalid" : ""}`} disabled={!interactive} onClick={() => onPeg?.(pegIndex)} aria-pressed={selectedPeg === pegIndex} aria-label={`Tower ${pegIndex + 1}. ${peg.length ? `Bottom to top: ${peg.join(", ")}.` : "Empty."}`}>{contents}</button>;
+      })}
+    </div>
+  );
+}
+
+function HanoiRace({
+  snapshot, now, selectedPeg, setSelectedPeg, busy, onMove, onLeave, onRematch, onToast,
+}: {
+  snapshot: Snapshot; now: number; selectedPeg: number | null; setSelectedPeg: (value: number | null) => void; busy: boolean; onMove: (from: number, to: number) => void; onLeave: () => void; onRematch: () => void; onToast: (message: string) => void;
+}) {
+  const match = snapshot.match as HanoiMatch;
+  const [invalidPeg, setInvalidPeg] = useState<number | null>(null);
+  const countdown = Math.max(0, Math.min(3, Math.ceil((match.startsAt - now) / 1_000)));
+  const ended = match.status === "finished" || match.status === "abandoned";
+  const playable = !ended && now >= match.startsAt && !busy;
+  const elapsed = (match.finishedAt ?? now) - match.startsAt;
+  const myProgress = hanoiProgress(match.myBoard, match.diskCount);
+  const opponentProgress = hanoiProgress(match.opponentBoard, match.diskCount);
+
+  const handlePeg = (peg: number) => {
+    if (!playable) return;
+    if (selectedPeg === null) {
+      if (!match.myBoard[peg].length) {
+        setInvalidPeg(peg); onToast("That tower is empty."); setTimeout(() => setInvalidPeg(null), 260); return;
+      }
+      setSelectedPeg(peg); return;
+    }
+    if (selectedPeg === peg) { setSelectedPeg(null); return; }
+    const local = moveHanoiDisk(match.myBoard, selectedPeg, peg, match.diskCount);
+    if (!local.ok) { setInvalidPeg(peg); onToast(local.message); setTimeout(() => setInvalidPeg(null), 260); return; }
+    const from = selectedPeg; setSelectedPeg(null); onMove(from, peg);
+  };
+
+  return <main className="race-shell hanoi-race">
+    <header className="race-topbar"><button type="button" className="icon-button" onClick={onLeave} aria-label="Leave race"><UiIcon name="back" /></button><Brand /><div className="race-kind"><span>{match.diskCount} RINGS</span><b>PAR {match.par} MOVES</b></div></header>
+    <section className="opponent-strip"><div className="opponent-identity"><Avatar player={match.opponent} small /><div><span>YOUR RIVAL</span><strong>{match.opponent.name}</strong></div><i className={match.opponent.online ? "online" : "offline"}>{match.opponent.online ? "LIVE" : "RECONNECTING"}</i></div><div className="opponent-mini" role="img" aria-label={`Opponent tower, ${opponentProgress} percent complete`}><HanoiBoardView board={match.opponentBoard} diskCount={match.diskCount} selectedPeg={null} interactive={false} mini /></div><div className="opponent-stats"><strong>{opponentProgress}%</strong><span>{match.opponentMoves} MOVES</span></div></section>
+    <section className="race-stage"><div className="race-stats"><div><span>TIME</span><strong>{formatTime(elapsed)}</strong></div><div className="race-status-center"><span className="progress-track" role="progressbar" aria-label="Tower complete" aria-valuemin={0} aria-valuemax={100} aria-valuenow={myProgress}><i style={{ width: `${myProgress}%` }} /></span><b>{match.myBoard[2].length} / {match.diskCount} RINGS ON GOAL</b></div><div><span>MOVES</span><strong>{match.myMoves}</strong></div></div>
+      <div className="board-wrap"><span className="you-badge">YOUR BOARD</span><HanoiBoardView board={match.myBoard} diskCount={match.diskCount} selectedPeg={selectedPeg} invalidPeg={invalidPeg} interactive={playable} onPeg={handlePeg} /></div>
+      <div className="move-prompt" aria-live="polite"><span className={`prompt-icon${selectedPeg !== null ? " active" : ""}`}>{selectedPeg !== null ? <UiIcon name="check" /> : <span>1</span>}</span><div><b>{selectedPeg !== null ? "RING LIFTED" : "YOUR MOVE"}</b><span>{selectedPeg !== null ? "Tap an empty tower or a larger ring" : "Tap a tower to lift its top ring"}</span></div>{selectedPeg !== null ? <button type="button" onClick={() => setSelectedPeg(null)}>CANCEL</button> : null}</div>
+    </section>
+    {countdown > 0 && !ended ? <div className="countdown-overlay" role="status" aria-live="assertive"><div className="countdown-card"><span>GET READY</span><strong key={countdown}>{countdown}</strong><p>Same tower. First perfect stack wins.</p></div></div> : null}
+    {ended ? <RaceResultDialog snapshot={snapshot} match={match} elapsed={elapsed} myProgress={myProgress} busy={busy} onRematch={onRematch} onLeave={onLeave} /> : null}
+  </main>;
+}
+
+function SortRace({
   snapshot,
   now,
   selectedBolt,
@@ -730,7 +848,7 @@ function Race({
   onRematch: () => void;
   onToast: (message: string) => void;
 }) {
-  const match = snapshot.match!;
+  const match = snapshot.match as SortMatch;
   const [invalidBolt, setInvalidBolt] = useState<number | null>(null);
   const invalidTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdown = Math.max(
@@ -935,6 +1053,33 @@ function Race({
   );
 }
 
+function Race(props: {
+  snapshot: Snapshot;
+  now: number;
+  selectedBolt: number | null;
+  setSelectedBolt: (value: number | null) => void;
+  busy: boolean;
+  onMove: (from: number, to: number) => void;
+  onReset: () => void;
+  onLeave: () => void;
+  onRematch: () => void;
+  onToast: (message: string) => void;
+}) {
+  return props.snapshot.match?.mode === "hanoi" ? (
+    <HanoiRace
+      snapshot={props.snapshot}
+      now={props.now}
+      selectedPeg={props.selectedBolt}
+      setSelectedPeg={props.setSelectedBolt}
+      busy={props.busy}
+      onMove={props.onMove}
+      onLeave={props.onLeave}
+      onRematch={props.onRematch}
+      onToast={props.onToast}
+    />
+  ) : <SortRace {...props} />;
+}
+
 function InviteSheet({
   invite,
   busy,
@@ -965,7 +1110,9 @@ function InviteSheet({
         <span className="section-kicker">INCOMING CHALLENGE</span>
         <h2 id="invite-title">{invite.player.name} WANTS TO RACE</h2>
         <p>
-          {invite.colorCount} colors · {invite.colorCount + 2} bolts · shared countdown
+          {invite.mode === "sort"
+            ? `${invite.colorCount} colors · ${(invite.colorCount ?? 0) + 2} bolts`
+            : `${invite.diskCount} rings · par ${2 ** (invite.diskCount ?? 0) - 1}`} · shared countdown
         </p>
         <div className="invite-actions">
           <button type="button" className="decline-button" onClick={onDecline} disabled={busy}>
@@ -1077,7 +1224,9 @@ function ConfirmLeaveDialog({
 export function GameApp() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState<BoltSortTierId>("endurance");
+  const [mode, setMode] = useState<GameMode>("sort");
+  const [sortDifficulty, setSortDifficulty] = useState<BoltSortTierId>("endurance");
+  const [hanoiDifficulty, setHanoiDifficulty] = useState<HanoiTierId>("classic");
   const [busy, setBusy] = useState(false);
   const [moveReconciling, setMoveReconciling] = useState(false);
   const [selectedBolt, setSelectedBolt] = useState<number | null>(null);
@@ -1095,7 +1244,7 @@ export function GameApp() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applySnapshot = useCallback((next: Snapshot) => {
-    if (snapshotRef.current?.match?.id !== next.match?.id) {
+    if (snapshotRef.current?.match?.id !== next.match?.id || snapshotRef.current?.match?.mode !== next.match?.mode) {
       moveQueueRef.current = [];
       setSelectedBolt(null);
       setConfirmingLeave(false);
@@ -1171,6 +1320,7 @@ export function GameApp() {
             moveQueueRef.current = [];
           } else if (
             current?.match?.id === next.match.id &&
+            current.match.mode === next.match.mode &&
             current.match.myMoves > next.match.myMoves
           ) {
             next = {
@@ -1179,7 +1329,7 @@ export function GameApp() {
                 ...next.match,
                 myBoard: current.match.myBoard,
                 myMoves: current.match.myMoves,
-              },
+              } as Match,
             };
           }
           applyNetworkSnapshot(next, sequence);
@@ -1302,12 +1452,15 @@ export function GameApp() {
       showToast("Give the connection a beat…");
       return;
     }
-    const local = moveBoltSortNut(match.myBoard, from, to, match.colorCount);
-    if (!local.ok) return;
-    applySnapshot({
-      ...current,
-      match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 },
-    });
+    if (match.mode === "sort") {
+      const local = moveBoltSortNut(match.myBoard, from, to, match.colorCount);
+      if (!local.ok) return;
+      applySnapshot({ ...current, match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 } });
+    } else {
+      const local = moveHanoiDisk(match.myBoard, from, to, match.diskCount);
+      if (!local.ok) return;
+      applySnapshot({ ...current, match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 } });
+    }
     moveQueueRef.current.push({
       matchId: match.id,
       from,
@@ -1347,6 +1500,7 @@ export function GameApp() {
   };
 
   const activeRace = snapshot.match && !["finished", "abandoned"].includes(snapshot.match.status);
+  const difficulty = mode === "sort" ? sortDifficulty : hanoiDifficulty;
 
   return (
     <>
@@ -1371,11 +1525,16 @@ export function GameApp() {
       ) : (
         <Lobby
           snapshot={snapshot}
+          mode={mode}
+          setMode={setMode}
           difficulty={difficulty}
-          setDifficulty={setDifficulty}
+          setDifficulty={(value) => {
+            if (mode === "sort") setSortDifficulty(value as BoltSortTierId);
+            else setHanoiDifficulty(value as HanoiTierId);
+          }}
           busy={busy}
           onChallenge={(playerId) =>
-            void sendAction("challenge", { playerId, tier: difficulty })
+            void sendAction("challenge", { playerId, mode, tier: difficulty })
           }
           onCancel={(inviteId) => void sendAction("cancel-invite", { inviteId })}
           onEditName={() => setEditingName(true)}

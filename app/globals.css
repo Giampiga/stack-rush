@@ -433,6 +433,32 @@ input:focus-visible {
   letter-spacing: 0.08em;
 }
 
+.mode-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin: var(--space-5) 0 var(--space-3);
+}
+
+.mode-picker button {
+  display: grid;
+  min-height: 62px;
+  grid-template-columns: 42px 1fr;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  padding: 8px 12px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mode-picker button > span { grid-row: 1 / span 2; font-size: 25px; font-weight: 950; }
+.mode-picker button b { align-self: end; font-size: 11px; letter-spacing: .06em; }
+.mode-picker button small { align-self: start; color: var(--ink-soft); font-size: 8px; font-weight: 850; letter-spacing: .08em; }
+.mode-picker button.active { border-color: var(--ink); background: var(--lime); box-shadow: 3px 3px 0 var(--ink); }
+
 .difficulty {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -940,6 +966,39 @@ input:focus-visible {
 .bolt-zone.selected { background: rgba(201, 244, 91, .16); box-shadow: inset 0 0 0 2px rgba(22,37,35,.12); }
 .bolt-zone.legal-target::after { content: ""; position: absolute; z-index: 7; inset: 3px; border: 2px dashed rgba(28,130,146,.72); border-radius: 14px; pointer-events: none; }
 
+.hanoi-board {
+  display: grid;
+  width: 100%;
+  min-height: min(52svh, 410px);
+  grid-template-columns: repeat(3, minmax(80px, 1fr));
+  align-items: end;
+  gap: var(--space-3);
+  padding: 38px var(--space-4) 14px;
+  touch-action: manipulation;
+}
+.hanoi-peg { position: relative; display: block; min-width: 0; height: 300px; border: 0; border-radius: 18px; background: transparent; padding: 0; cursor: pointer; }
+.hanoi-peg:disabled { opacity: 1; cursor: default; }
+.hanoi-peg:not(:disabled):hover, .hanoi-peg.selected { background: rgba(201,244,91,.16); }
+.hanoi-peg.selected { box-shadow: inset 0 0 0 2px rgba(22,37,35,.12); }
+.hanoi-rod { position: absolute; z-index: 1; bottom: 18px; left: 50%; width: 13px; height: 245px; transform: translateX(-50%); border: 2px solid var(--ink); border-radius: 8px 8px 2px 2px; background: repeating-linear-gradient(to bottom,#eee8dc 0 9px,#bbb7ae 9px 12px); }
+.hanoi-base { position: absolute; z-index: 2; right: 4%; bottom: 4px; left: 4%; height: 20px; border: 2px solid var(--ink); border-radius: 50%; background: #d9d5cc; box-shadow: 0 4px 0 var(--ink); }
+.ring-stack { position: absolute; z-index: 3; right: 4%; bottom: 21px; left: 4%; display: flex; flex-direction: column-reverse; align-items: center; }
+.hanoi-ring { display: flex; height: 35px; flex: 0 0 auto; align-items: center; justify-content: center; margin-top: -3px; border: 2px solid var(--ink); border-radius: 12px; background: var(--sky); box-shadow: inset 0 -8px rgba(0,0,0,.13), inset 0 5px rgba(255,255,255,.35), 0 3px 0 var(--ink); transition: transform 150ms ease; }
+.hanoi-ring:nth-child(2n) { background: var(--orange); }
+.hanoi-ring:nth-child(3n) { background: var(--purple); }
+.hanoi-ring:nth-child(4n) { background: var(--lime); }
+.hanoi-ring:nth-child(5n) { background: var(--yellow); }
+.hanoi-ring.lifted { transform: translateY(-22px) scale(1.03); }
+.hanoi-ring i { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border: 1.5px solid var(--ink); border-radius: 50%; background: rgba(255,255,255,.65); font-size: 8px; font-style: normal; font-weight: 950; }
+.hanoi-peg.invalid { animation: bolt-shake 220ms ease; }
+.mini-hanoi-board { min-height: 0; height: 52px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 0; }
+.mini-hanoi-board .hanoi-peg { height: 48px; min-height: 0; }
+.mini-hanoi-board .hanoi-rod { bottom: 5px; width: 3px; height: 37px; border-width: 1px; }
+.mini-hanoi-board .hanoi-base { bottom: 1px; height: 5px; border-width: 1px; box-shadow: none; }
+.mini-hanoi-board .ring-stack { bottom: 5px; }
+.mini-hanoi-board .hanoi-ring { height: 6px; margin-top: -1px; border-width: 1px; border-radius: 3px; box-shadow: none; }
+.mini-hanoi-board .hanoi-ring i { display: none; }
+
 .bolt-rod {
   position: absolute;
   z-index: 1;
@@ -1155,6 +1214,11 @@ input:focus-visible {
   .difficulty strong { grid-row: auto; font-size: 29px; line-height: .9; }
   .difficulty span { align-self: auto; font-size: 7px; letter-spacing: .02em; }
   .difficulty small { align-self: auto; font-size: 7px; }
+  .mode-picker { gap: var(--space-2); margin-top: var(--space-4); }
+  .mode-picker button { min-height: 58px; grid-template-columns: 30px 1fr; padding: 7px 9px; }
+  .mode-picker button > span { font-size: 20px; }
+  .mode-picker button b { font-size: 9px; }
+  .mode-picker button small { font-size: 6px; }
   .rivals-heading { margin-top: var(--space-6); padding-top: var(--space-5); }
   .online-count { padding: 6px 8px; font-size: 8px; }
   .racer-card { min-height: 72px; padding: 9px; }
@@ -1206,6 +1270,12 @@ input:focus-visible {
   .board-wrap { padding: var(--space-5) var(--space-1) var(--space-2); }
   .bolt-sort-board { min-height: min(52svh, 439px); }
   .opponent-mini .mini-bolt-board { height: 46px; min-height: 0; }
+  .opponent-mini .mini-hanoi-board { width: 116px; height: 46px; min-height: 0; }
+  .hanoi-board { min-height: min(48svh, 380px); gap: var(--space-1); padding: 30px 2px 10px; }
+  .hanoi-peg { height: min(43svh, 330px); min-height: 250px; }
+  .mini-hanoi-board .hanoi-peg { height: 44px; min-height: 0; }
+  .hanoi-rod { height: calc(100% - 42px); }
+  .hanoi-ring { height: 31px; border-radius: 9px; }
   .move-prompt { width: calc(100% - var(--space-4)); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); }
   .prompt-icon { width: 29px; height: 29px; }
   .result-card h2 { font-size: 27px; }
@@ -1224,6 +1294,7 @@ input:focus-visible {
 @media (max-width: 359px) and (max-height: 650px) {
   .opponent-strip { grid-template-columns: 1fr 104px auto; }
   .mini-bolt-board { width: 104px; }
+  .opponent-mini .mini-hanoi-board { width: 104px; }
   .race-topbar { min-height: 54px; }
   .opponent-strip { height: 54px; margin-top: var(--space-1); padding: var(--space-1) var(--space-2); }
   .race-stage { margin-top: var(--space-1); }

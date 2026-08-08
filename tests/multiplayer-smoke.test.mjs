@@ -9,6 +9,11 @@ import {
   listLegalBoltMoves,
   moveBoltSortNut,
 } from "../lib/bolt-sort.ts";
+import {
+  HANOI_LEVELS,
+  isHanoiSolved,
+  isValidHanoiBoard,
+} from "../lib/hanoi.ts";
 
 const baseUrl = process.env.PEG_RUSH_BASE_URL ?? "http://localhost:3000";
 
@@ -226,6 +231,39 @@ test("two guests solve, rematch, forfeit, and receive exactly-once records", asy
   assert.equal(duplicateLeave.status, 404);
   assert.equal((await bob.ok("sync")).player.races, 2);
   await alice.ok("leave-match", { matchId: rematchId });
+});
+
+test("two guests can race a server-authoritative Hanoi match", async () => {
+  const alice = new GuestAgent();
+  const bob = new GuestAgent();
+  const aliceSession = await alice.ok("session", { name: uniqueName("Tower") });
+  const bobSession = await bob.ok("session", { name: uniqueName("Ring") });
+  await alice.ok("challenge", { playerId: bobSession.player.id, mode: "hanoi", tier: "quick" });
+  const invitation = await bob.ok("sync");
+  assert.equal(invitation.incoming[0].mode, "hanoi");
+  assert.equal(invitation.incoming[0].diskCount, HANOI_LEVELS.quick.diskCount);
+  const accepted = await bob.ok("respond", { inviteId: invitation.incoming[0].id, response: "accept" });
+  assert.equal(accepted.match.mode, "hanoi");
+  assert.equal(accepted.match.colorCount, null);
+  assert.equal(accepted.match.diskCount, 3);
+  assert.equal(accepted.match.par, 7);
+  assert.equal(isValidHanoiBoard(accepted.match.myBoard, 3), true);
+  assert.deepEqual(accepted.match.myBoard, [[3, 2, 1], [], []]);
+
+  const early = await alice.post("move", { matchId: accepted.match.id, from: 0, to: 2, expectedMoves: 0 });
+  assert.equal(early.data.code, "MATCH_NOT_STARTED");
+  await waitForStart(accepted.match);
+  const solution = [[0, 2], [0, 1], [2, 1], [0, 2], [1, 0], [1, 2], [0, 2]];
+  let finished;
+  for (const [expectedMoves, [from, to]] of solution.entries()) {
+    finished = await alice.ok("move", { matchId: accepted.match.id, from, to, expectedMoves });
+  }
+  assert.equal(finished.match.status, "finished");
+  assert.equal(finished.match.winnerId, aliceSession.player.id);
+  assert.equal(isHanoiSolved(finished.match.myBoard, 3), true);
+  assert.equal(finished.match.myMoves, 7);
+  await alice.ok("leave-match", { matchId: accepted.match.id });
+  await bob.ok("leave-match", { matchId: accepted.match.id });
 });
 
 test("optimistic concurrency accepts only one duplicate move", async () => {

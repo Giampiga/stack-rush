@@ -10,6 +10,16 @@ import {
   type BoltSortBoard,
   type BoltSortTierId,
 } from "@/lib/bolt-sort";
+import {
+  HANOI_LEVELS,
+  createHanoiBoard,
+  hanoiProgress,
+  isHanoiSolved,
+  isValidHanoiBoard,
+  moveHanoiDisk,
+  type HanoiBoard,
+  type HanoiTierId,
+} from "@/lib/hanoi";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +53,7 @@ type InviteRow = {
   id: string;
   from_player_id: string;
   to_player_id: string;
+  game_mode: GameMode;
   disk_count: number;
   status: string;
   created_at: number;
@@ -53,6 +64,7 @@ type MatchRow = {
   id: string;
   player_one_id: string;
   player_two_id: string;
+  game_mode: GameMode;
   disk_count: number;
   status: string;
   starts_at: number;
@@ -76,11 +88,16 @@ type GameRequest = {
   inviteId?: string;
   matchId?: string;
   tier?: string;
+  mode?: string;
   response?: string;
   from?: number;
   to?: number;
   expectedMoves?: number;
 };
+
+type GameMode = "sort" | "hanoi";
+type GameTierId = BoltSortTierId | HanoiTierId;
+type GameBoard = BoltSortBoard | HanoiBoard;
 
 class GameError extends Error {
   constructor(
@@ -255,17 +272,23 @@ function normalizeName(value: unknown): string | null {
   return clean.length >= 2 ? clean : null;
 }
 
-function parseTier(value: unknown): BoltSortTierId | null {
-  if (typeof value !== "string") return null;
-  return Object.prototype.hasOwnProperty.call(SORT_LEVELS, value)
-    ? (value as BoltSortTierId)
-    : null;
+function parseMode(value: unknown): GameMode | null {
+  return value === "sort" || value === "hanoi" ? value : null;
 }
 
-function tierForColorCount(colorCount: number): BoltSortTierId {
-  const entry = (Object.entries(SORT_LEVELS) as Array<
-    [BoltSortTierId, (typeof SORT_LEVELS)[BoltSortTierId]]
-  >).find(([, config]) => config.colorCount === colorCount);
+function parseTier(mode: GameMode, value: unknown): GameTierId | null {
+  if (typeof value !== "string") return null;
+  const levels = mode === "sort" ? SORT_LEVELS : HANOI_LEVELS;
+  return Object.prototype.hasOwnProperty.call(levels, value) ? (value as GameTierId) : null;
+}
+
+function tierForCount(mode: GameMode, count: number): GameTierId {
+  const entries = mode === "sort" ? Object.entries(SORT_LEVELS) : Object.entries(HANOI_LEVELS);
+  const entry = entries.find(([, config]) =>
+    mode === "sort"
+      ? "colorCount" in config && config.colorCount === count
+      : "diskCount" in config && config.diskCount === count,
+  );
   if (!entry) {
     throw new GameError(
       "Stored match difficulty is invalid.",
@@ -273,7 +296,13 @@ function tierForColorCount(colorCount: number): BoltSortTierId {
       "INVALID_MATCH_STATE",
     );
   }
-  return entry[0];
+  return entry[0] as GameTierId;
+}
+
+function difficultyCount(mode: GameMode, tier: GameTierId): number {
+  return mode === "sort"
+    ? SORT_LEVELS[tier as BoltSortTierId].colorCount
+    : HANOI_LEVELS[tier as HanoiTierId].diskCount;
 }
 
 function puzzleSeed(matchId: string): string {
@@ -452,14 +481,27 @@ async function guestClientKey(request: Request): Promise<string> {
   return hashSecret(`guest-v1\n${address}\n${userAgent}\n${language}`);
 }
 
-function parseBoard(serialized: string, colorCount: number): BoltSortBoard {
+function parseBoard(serialized: string, mode: GameMode, count: number): GameBoard {
   try {
     const board = JSON.parse(serialized) as unknown;
-    if (isValidBoltSortBoard(board, colorCount)) return board;
+    if (mode === "sort" && isValidBoltSortBoard(board, count)) return board;
+    if (mode === "hanoi" && isValidHanoiBoard(board, count)) return board;
   } catch {
     // The caller receives a safe server error below.
   }
   throw new GameError("Stored match state is invalid.", 500, "INVALID_MATCH_STATE");
+}
+
+function initialBoard(mode: GameMode, tier: GameTierId, matchId: string): GameBoard {
+  return mode === "sort"
+    ? createBoltSortPuzzle(tier as BoltSortTierId, puzzleSeed(matchId)).board
+    : createHanoiBoard(HANOI_LEVELS[tier as HanoiTierId].diskCount);
+}
+
+function gameProgress(board: GameBoard, mode: GameMode, count: number): number {
+  return mode === "sort"
+    ? boltSortProgress(board as BoltSortBoard, count)
+    : hanoiProgress(board as HanoiBoard, count);
 }
 
 async function buildSnapshot(
@@ -538,29 +580,34 @@ async function buildSnapshot(
         throw new GameError("Opponent was not found.", 500, "OPPONENT_NOT_FOUND");
       }
 
-      const tier = tierForColorCount(match.disk_count);
+      const tier = tierForCount(match.game_mode, match.disk_count);
       const myBoard = parseBoard(
         isPlayerOne ? match.player_one_state : match.player_two_state,
+        match.game_mode,
         match.disk_count,
       );
       const opponentBoard = parseBoard(
         isPlayerOne ? match.player_two_state : match.player_one_state,
+        match.game_mode,
         match.disk_count,
       );
 
       matchPayload = {
         id: match.id,
         status: match.status,
+        mode: match.game_mode,
         tier,
-        colorCount: match.disk_count,
-        capacity: BOLT_CAPACITY,
+        colorCount: match.game_mode === "sort" ? match.disk_count : null,
+        diskCount: match.game_mode === "hanoi" ? match.disk_count : null,
+        capacity: match.game_mode === "sort" ? BOLT_CAPACITY : null,
+        par: match.game_mode === "hanoi" ? 2 ** match.disk_count - 1 : null,
         startsAt: match.starts_at,
         finishedAt: match.finished_at,
         winnerId: match.winner_id,
         myBoard,
         opponentBoard,
-        myProgress: boltSortProgress(myBoard, match.disk_count),
-        opponentProgress: boltSortProgress(opponentBoard, match.disk_count),
+        myProgress: gameProgress(myBoard, match.game_mode, match.disk_count),
+        opponentProgress: gameProgress(opponentBoard, match.game_mode, match.disk_count),
         myMoves: isPlayerOne
           ? match.player_one_moves
           : match.player_two_moves,
@@ -609,7 +656,7 @@ async function buildSnapshot(
 
   const incomingResult = await database
     .prepare(
-      `SELECT i.id, i.disk_count, i.created_at, p.id AS player_id,
+      `SELECT i.id, i.game_mode, i.disk_count, i.created_at, p.id AS player_id,
         p.name, p.hue, p.wins, p.races
        FROM invites i
        JOIN players p ON p.id = i.from_player_id
@@ -620,6 +667,7 @@ async function buildSnapshot(
     .bind(player.id)
     .all<{
       id: string;
+      game_mode: GameMode;
       disk_count: number;
       created_at: number;
       player_id: string;
@@ -631,7 +679,7 @@ async function buildSnapshot(
 
   const outgoingResult = await database
     .prepare(
-      `SELECT i.id, i.disk_count, i.created_at, p.id AS player_id,
+      `SELECT i.id, i.game_mode, i.disk_count, i.created_at, p.id AS player_id,
         p.name, p.hue, p.wins, p.races
        FROM invites i
        JOIN players p ON p.id = i.to_player_id
@@ -642,6 +690,7 @@ async function buildSnapshot(
     .bind(player.id)
     .all<{
       id: string;
+      game_mode: GameMode;
       disk_count: number;
       created_at: number;
       player_id: string;
@@ -653,8 +702,10 @@ async function buildSnapshot(
 
   const mapInvite = (invite: (typeof incomingResult.results)[number]) => ({
     id: invite.id,
-    tier: tierForColorCount(invite.disk_count),
-    colorCount: invite.disk_count,
+    mode: invite.game_mode,
+    tier: tierForCount(invite.game_mode, invite.disk_count),
+    colorCount: invite.game_mode === "sort" ? invite.disk_count : null,
+    diskCount: invite.game_mode === "hanoi" ? invite.disk_count : null,
     createdAt: invite.created_at,
     player: {
       id: invite.player_id,
@@ -781,11 +832,12 @@ async function challengePlayer(
   now: number,
 ) {
   const targetId = typeof payload.playerId === "string" ? payload.playerId : "";
-  const tier = parseTier(payload.tier);
+  const mode = payload.mode === undefined ? "sort" : parseMode(payload.mode);
+  const tier = mode ? parseTier(mode, payload.tier) : null;
   if (!targetId || targetId === player.id) {
     throw new GameError("Choose another online player.", 400, "INVALID_PLAYER");
   }
-  if (!tier) {
+  if (!mode || !tier) {
     throw new GameError(
       "Choose a valid race tier.",
       400,
@@ -819,16 +871,16 @@ async function challengePlayer(
   }
 
   const inviteId = crypto.randomUUID();
-  const colorCount = SORT_LEVELS[tier].colorCount;
+  const count = difficultyCount(mode, tier);
   try {
     await database.batch([
       database
         .prepare(
           `INSERT INTO invites
-           (id, from_player_id, to_player_id, disk_count, status, created_at, responded_at)
-           VALUES (?, ?, ?, ?, 'pending', ?, NULL)`,
+           (id, from_player_id, to_player_id, game_mode, disk_count, status, created_at, responded_at)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)`,
         )
-        .bind(inviteId, player.id, target.id, colorCount, now),
+        .bind(inviteId, player.id, target.id, mode, count, now),
       database
         .prepare(
           "INSERT INTO active_slots (player_id, game_id, role, created_at) VALUES (?, ?, 'one', ?)",
@@ -923,10 +975,8 @@ async function respondToInvite(
     throw new GameError("That invite is no longer active.", 409, "INVITE_CLOSED");
   }
 
-  const tier = tierForColorCount(invite.disk_count);
-  const board = JSON.stringify(
-    createBoltSortPuzzle(tier, puzzleSeed(invite.id)).board,
-  );
+  const tier = tierForCount(invite.game_mode, invite.disk_count);
+  const board = JSON.stringify(initialBoard(invite.game_mode, tier, invite.id));
   const startsAt = now + COUNTDOWN_MS;
   const results = await database.batch([
     database
@@ -961,12 +1011,12 @@ async function respondToInvite(
       ),
     database
       .prepare(
-        `INSERT INTO matches
-         (id, player_one_id, player_two_id, disk_count, status, starts_at,
+         `INSERT INTO matches
+         (id, player_one_id, player_two_id, game_mode, disk_count, status, starts_at,
           winner_id, player_one_state, player_two_state, player_one_moves,
           player_two_moves, player_one_rematch, player_two_rematch, rematch_id,
           created_at, updated_at, finished_at)
-         SELECT i.id, i.from_player_id, i.to_player_id, i.disk_count,
+         SELECT i.id, i.from_player_id, i.to_player_id, i.game_mode, i.disk_count,
           'countdown', ?, NULL, ?, ?, 0, 0, 0, 0, NULL, ?, ?, NULL
          FROM invites i
          WHERE i.id = ? AND i.status = 'accepted' AND i.responded_at = ?
@@ -1102,22 +1152,31 @@ async function makeMove(
     throw new GameError("Your board changed. Try that move again.", 409, "STALE_MOVE");
   }
 
-  tierForColorCount(match.disk_count);
   const board = parseBoard(
     isPlayerOne ? match.player_one_state : match.player_two_state,
+    match.game_mode,
     match.disk_count,
   );
-  const result = moveBoltSortNut(
-    board,
-    payload.from!,
-    payload.to!,
-    match.disk_count,
-  );
+  const result = match.game_mode === "sort"
+    ? moveBoltSortNut(
+        board as BoltSortBoard,
+        payload.from!,
+        payload.to!,
+        match.disk_count,
+      )
+    : moveHanoiDisk(
+        board as HanoiBoard,
+        payload.from!,
+        payload.to!,
+        match.disk_count,
+      );
   if (!result.ok) {
     throw new GameError(result.message, 409, "ILLEGAL_MOVE");
   }
 
-  const won = isBoltSortSolved(result.board, match.disk_count);
+  const won = match.game_mode === "sort"
+    ? isBoltSortSolved(result.board as BoltSortBoard, match.disk_count)
+    : isHanoiSolved(result.board as HanoiBoard, match.disk_count);
   const nextMoves = moves + 1;
   const stateColumn = isPlayerOne ? "player_one_state" : "player_two_state";
   const movesColumn = isPlayerOne ? "player_one_moves" : "player_two_moves";
@@ -1276,8 +1335,8 @@ async function resetBoard(
     throw new GameError("Your board changed. Try again.", 409, "STALE_MOVE");
   }
 
-  const tier = tierForColorCount(match.disk_count);
-  const initialBoard = createBoltSortPuzzle(tier, puzzleSeed(match.id)).board;
+  const tier = tierForCount(match.game_mode, match.disk_count);
+  const resetState = initialBoard(match.game_mode, tier, match.id);
   const nextMoves = moves + 1;
   const sql = isPlayerOne
     ? `UPDATE matches SET player_one_state = ?, player_one_moves = ?,
@@ -1291,7 +1350,7 @@ async function resetBoard(
   const update = await database
     .prepare(sql)
     .bind(
-      JSON.stringify(initialBoard),
+      JSON.stringify(resetState),
       nextMoves,
       now,
       match.id,
@@ -1498,10 +1557,8 @@ async function requestRematch(
   }
   const voteColumn = isPlayerOne ? "player_one_rematch" : "player_two_rematch";
   const rematchId = crypto.randomUUID();
-  const tier = tierForColorCount(match.disk_count);
-  const board = JSON.stringify(
-    createBoltSortPuzzle(tier, puzzleSeed(rematchId)).board,
-  );
+  const tier = tierForCount(match.game_mode, match.disk_count);
+  const board = JSON.stringify(initialBoard(match.game_mode, tier, rematchId));
   const startsAt = now + COUNTDOWN_MS;
 
   const results = await database.batch([
@@ -1544,12 +1601,12 @@ async function requestRematch(
       .bind(rematchId, now, match.id),
     database
       .prepare(
-        `INSERT INTO matches
-         (id, player_one_id, player_two_id, disk_count, status, starts_at,
+         `INSERT INTO matches
+         (id, player_one_id, player_two_id, game_mode, disk_count, status, starts_at,
           winner_id, player_one_state, player_two_state, player_one_moves,
           player_two_moves, player_one_rematch, player_two_rematch, rematch_id,
           created_at, updated_at, finished_at)
-         SELECT ?, m.player_one_id, m.player_two_id, m.disk_count,
+         SELECT ?, m.player_one_id, m.player_two_id, m.game_mode, m.disk_count,
           'countdown', ?, NULL, ?, ?, 0, 0, 0, 0, NULL, ?, ?, NULL
          FROM matches m
          WHERE m.id = ? AND m.rematch_id = ?

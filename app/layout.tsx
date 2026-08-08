@@ -22,19 +22,19 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "Peg Rush — Multiplayer Color-Sort Race",
+    title: "Peg Rush — Live Multiplayer Puzzle Races",
     description:
-      "Challenge someone online and race the same live color-sort puzzle. No account needed.",
+      "Challenge someone online to a live nut-sort or Tower of Hanoi race. No account needed.",
     applicationName: "Peg Rush",
     openGraph: {
-      title: "Peg Rush — Race the Sort",
-      description: "Pick a rival. Sort faster. No account needed.",
+      title: "Peg Rush — Race the Puzzle",
+      description: "Pick a rival. Choose a puzzle. No account needed.",
       type: "website",
     },
     twitter: {
       card: "summary",
-      title: "Peg Rush — Race the Sort",
-      description: "Pick a rival. Sort faster. No account needed.",
+      title: "Peg Rush — Race the Puzzle",
+      description: "Pick a rival. Choose a puzzle. No account needed.",
     },
   };
 }
