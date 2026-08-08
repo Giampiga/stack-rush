@@ -2,11 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  moveHanoiDisk,
-  perfectMoveCount,
-  solvedProgress,
-  type HanoiBoard,
-} from "@/lib/hanoi";
+  BOLT_CAPACITY,
+  BOLT_COLORS,
+  BOLT_SORT_TIERS,
+  boltSortProgress,
+  getBoltSortProgress,
+  isBoltSortSolved,
+  isLockedBolt,
+  listLegalBoltMoves,
+  moveBoltSortNut,
+  type BoltColor,
+  type BoltSortBoard,
+  type BoltSortTierId,
+} from "@/lib/bolt-sort";
 
 type Player = {
   id: string;
@@ -20,20 +28,22 @@ type OnlinePlayer = Player & { available: boolean };
 
 type Invite = {
   id: string;
-  diskCount: number;
+  tier: BoltSortTierId;
+  colorCount: number;
   createdAt: number;
   player: Player;
 };
 
 type Match = {
   id: string;
+  tier: BoltSortTierId;
   status: "countdown" | "playing" | "finished" | "abandoned";
-  diskCount: number;
+  colorCount: number;
   startsAt: number;
   finishedAt: number | null;
   winnerId: string | null;
-  myBoard: HanoiBoard;
-  opponentBoard: HanoiBoard;
+  myBoard: BoltSortBoard;
+  opponentBoard: BoltSortBoard;
   myMoves: number;
   opponentMoves: number;
   myRematch: boolean;
@@ -57,6 +67,13 @@ type GameResponse = {
   code?: string;
 };
 
+type QueuedMove = {
+  matchId: string;
+  from: number;
+  to: number;
+  expectedMoves: number;
+};
+
 class RequestError extends Error {
   constructor(
     message: string,
@@ -64,6 +81,70 @@ class RequestError extends Error {
   ) {
     super(message);
   }
+}
+
+const MODAL_FOCUS_SELECTOR = [
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[href]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function useModalFocus<T extends HTMLElement>(onEscape?: () => void) {
+  const dialogRef = useRef<T>(null);
+  const escapeRef = useRef(onEscape);
+
+  useEffect(() => {
+    escapeRef.current = onEscape;
+  }, [onEscape]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+
+    const getFocusable = () =>
+      Array.from(dialog.querySelectorAll<HTMLElement>(MODAL_FOCUS_SELECTOR)).filter(
+        (element) => !element.hasAttribute("disabled") && element.tabIndex !== -1,
+      );
+    const initialFocus =
+      dialog.querySelector<HTMLElement>("[data-autofocus]") ?? getFocusable()[0] ?? dialog;
+
+    queueMicrotask(() => {
+      if (dialog.isConnected) initialFocus.focus();
+    });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && escapeRef.current) {
+        event.preventDefault();
+        escapeRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusable();
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      event.preventDefault();
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? focusable.length : currentIndex) - 1
+        : (currentIndex + 1) % focusable.length;
+      focusable[nextIndex].focus();
+    };
+
+    dialog.addEventListener("keydown", onKeyDown);
+    return () => {
+      dialog.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  return dialogRef;
 }
 
 const ICONS = {
@@ -153,28 +234,24 @@ function DifficultyPicker({
   value,
   onChange,
 }: {
-  value: number;
-  onChange: (value: number) => void;
+  value: BoltSortTierId;
+  onChange: (value: BoltSortTierId) => void;
 }) {
-  const levels = [
-    { disks: 3, label: "QUICK", par: 7 },
-    { disks: 4, label: "CLASSIC", par: 15 },
-    { disks: 5, label: "EXPERT", par: 31 },
-  ];
+  const levels = Object.values(BOLT_SORT_TIERS);
   return (
     <div className="difficulty" role="radiogroup" aria-label="Race difficulty">
       {levels.map((level) => (
         <button
-          key={level.disks}
+          key={level.id}
           type="button"
           role="radio"
-          aria-checked={value === level.disks}
-          className={value === level.disks ? "active" : ""}
-          onClick={() => onChange(level.disks)}
+          aria-checked={value === level.id}
+          className={value === level.id ? "active" : ""}
+          onClick={() => onChange(level.id)}
         >
-          <strong>{level.disks}</strong>
-          <span>{level.label}</span>
-          <small>PAR {level.par}</small>
+          <strong>{level.colorCount}</strong>
+          <span>{level.label.toUpperCase()}</span>
+          <small>{level.colorCount + 2} BOLTS</small>
         </button>
       ))}
     </div>
@@ -230,8 +307,8 @@ function Lobby({
   onToast,
 }: {
   snapshot: Snapshot;
-  difficulty: number;
-  setDifficulty: (value: number) => void;
+  difficulty: BoltSortTierId;
+  setDifficulty: (value: BoltSortTierId) => void;
   busy: boolean;
   onChallenge: (playerId: string) => void;
   onCancel: (inviteId: string) => void;
@@ -244,7 +321,7 @@ function Lobby({
   const shareLounge = async () => {
     const shareData = {
       title: "Peg Rush",
-      text: "Race me in Tower of Hanoi—no account needed.",
+      text: "Race me in a live color-sort sprint—no account needed.",
       url: window.location.href,
     };
     try {
@@ -293,7 +370,7 @@ function Lobby({
             <em>RACE THE PUZZLE.</em>
           </h1>
           <p>
-            Same rings. Same countdown. First to rebuild the tower takes the win.
+            Same scramble. Same countdown. First to sort every color takes the win.
           </p>
         </div>
         <button type="button" className="share-button" onClick={shareLounge}>
@@ -306,9 +383,9 @@ function Lobby({
           <div className="section-heading">
             <div>
               <span className="section-kicker">01 · CHOOSE YOUR RACE</span>
-              <h2>HOW MANY RINGS?</h2>
+              <h2>HOW MANY COLORS?</h2>
             </div>
-            <span className="par-note">FEWER MOVES = CLEANER WIN</span>
+            <span className="par-note">MORE COLORS = BIGGER SCRAMBLE</span>
           </div>
           <DifficultyPicker value={difficulty} onChange={setDifficulty} />
 
@@ -324,7 +401,7 @@ function Lobby({
 
           {outgoing ? (
             <div className="waiting-card" role="status">
-              <span className="waiting-rings" aria-hidden="true">
+              <span className="waiting-nuts" aria-hidden="true">
                 <i />
                 <i />
                 <i />
@@ -332,7 +409,7 @@ function Lobby({
               <div>
                 <strong>CHALLENGE SENT</strong>
                 <span>
-                  Waiting for {outgoing.player.name} · {outgoing.diskCount} rings
+                  Waiting for {outgoing.player.name} · {outgoing.colorCount} colors
                 </span>
               </div>
               <button
@@ -357,7 +434,7 @@ function Lobby({
               ))
             ) : (
               <div className="empty-lounge">
-                <span className="empty-tower" aria-hidden="true">
+                <span className="empty-bolts" aria-hidden="true">
                   <i />
                   <i />
                   <i />
@@ -404,15 +481,15 @@ function Lobby({
             <ol>
               <li>
                 <span>1</span>
-                <p><b>TAP</b> a peg to lift its top ring.</p>
+                <p><b>TAP</b> a bolt to lift its top nut.</p>
               </li>
               <li>
                 <span>2</span>
-                <p><b>PLACE</b> it on an empty peg or a larger ring.</p>
+                <p><b>PLACE</b> it on an empty bolt or the same color.</p>
               </li>
               <li>
                 <span>3</span>
-                <p><b>BUILD</b> the full tower on the right peg first.</p>
+                <p><b>SORT</b> four of every color before your rival.</p>
               </li>
             </ol>
             <div className="rule-stamp">
@@ -430,67 +507,202 @@ function Lobby({
   );
 }
 
-function HanoiBoardView({
+function nutIndex(nut: BoltColor) {
+  return BOLT_COLORS.indexOf(nut);
+}
+
+function boardColumns(boltCount: number) {
+  if (boltCount <= 8) return 4;
+  if (boltCount <= 11) return 6;
+  if (boltCount <= 14) return 5;
+  return 6;
+}
+
+function BoltSortBoardView({
   board,
-  diskCount,
-  selectedPeg,
+  colorCount,
+  selectedBolt,
+  invalidBolt = null,
   interactive,
-  onPeg,
+  onBolt,
   mini = false,
 }: {
-  board: HanoiBoard;
-  diskCount: number;
-  selectedPeg: number | null;
+  board: BoltSortBoard;
+  colorCount: number;
+  selectedBolt: number | null;
+  invalidBolt?: number | null;
   interactive: boolean;
-  onPeg?: (peg: number) => void;
+  onBolt?: (bolt: number) => void;
   mini?: boolean;
 }) {
-  const pegNames = ["start", "middle", "goal"];
   return (
-    <div className={`hanoi-board${mini ? " mini-board" : ""}`}>
-      {board.map((peg, pegIndex) => {
-        const topDisk = peg.at(-1);
+    <div
+      className={`bolt-sort-board${mini ? " mini-bolt-board" : ""}`}
+      style={{ "--bolt-columns": boardColumns(board.length) } as React.CSSProperties}
+      role={mini ? undefined : "group"}
+      aria-label={mini ? undefined : `${colorCount}-color sorting board`}
+      aria-hidden={mini || undefined}
+    >
+      {board.map((bolt, boltIndex) => {
+        const topNut = bolt.at(-1);
+        const locked = isLockedBolt(bolt);
+        const legalTarget =
+          selectedBolt !== null &&
+          selectedBolt !== boltIndex &&
+          moveBoltSortNut(board, selectedBolt, boltIndex, colorCount).ok;
+        const classes = `bolt-zone${selectedBolt === boltIndex ? " selected" : ""}${
+          legalTarget ? " legal-target" : ""
+        }${locked ? " locked" : ""}${invalidBolt === boltIndex ? " invalid" : ""}`;
+        const stackSummary = bolt.length
+          ? `Bottom to top: ${bolt
+              .map((nut) => `${nut}, marker ${nutIndex(nut) + 1}`)
+              .join(", ")}.`
+          : "Empty.";
+        const contents = (
+          <>
+            <span className="bolt-rod" />
+            <span className="nut-stack">
+              {bolt.map((nut, index) => {
+                const color = nutIndex(nut);
+                return (
+                  <span
+                    key={`${nut}-${index}`}
+                    className={`game-nut nut-${color}${
+                      selectedBolt === boltIndex && index === bolt.length - 1
+                        ? " lifted"
+                        : ""
+                    }`}
+                  >
+                    <i>{color + 1}</i>
+                  </span>
+                );
+              })}
+            </span>
+            <span className="bolt-base" />
+            {locked && !mini ? <span className="bolt-cap" aria-hidden="true">✓</span> : null}
+          </>
+        );
+        if (mini) {
+          return (
+            <span key={boltIndex} className={classes}>
+              {contents}
+            </span>
+          );
+        }
         return (
           <button
-            key={pegIndex}
+            key={boltIndex}
             type="button"
-            className={`peg-zone${selectedPeg === pegIndex ? " selected" : ""}${
-              pegIndex === 2 ? " goal-peg" : ""
-            }`}
-            onClick={() => onPeg?.(pegIndex)}
+            className={classes}
+            onClick={() => onBolt?.(boltIndex)}
             disabled={!interactive}
-            aria-label={`${pegNames[pegIndex]} peg, ${peg.length} ring${
-              peg.length === 1 ? "" : "s"
-            }${topDisk ? `, top ring ${topDisk}` : ""}`}
+            aria-pressed={selectedBolt === boltIndex}
+            aria-label={`Bolt ${boltIndex + 1} of ${board.length}. ${stackSummary} ${
+              topNut
+                ? `Top nut ${topNut}, marker ${nutIndex(topNut) + 1}.`
+                : ""
+            } ${bolt.length} of ${BOLT_CAPACITY} spaces filled.${
+              locked ? " Sorted and locked." : ""
+            }`}
           >
-            <span className="peg-rod" />
-            <span className="disk-stack">
-              {peg.map((disk, index) => (
-                <span
-                  key={disk}
-                  className={`game-disk disk-${(disk - 1) % 5}${
-                    selectedPeg === pegIndex && index === peg.length - 1
-                      ? " lifted"
-                      : ""
-                  }`}
-                  style={{
-                    width: `${36 + (disk / diskCount) * 62}%`,
-                    "--disk-order": index,
-                  } as React.CSSProperties}
-                >
-                  <i>{disk}</i>
-                </span>
-              ))}
-            </span>
-            {!mini ? (
-              <span className="peg-label">
-                {pegIndex === 0 ? "START" : pegIndex === 1 ? "SWAP" : "FINISH"}
-              </span>
-            ) : null}
+            {contents}
           </button>
         );
       })}
-      <span className="board-base" />
+    </div>
+  );
+}
+
+function RaceResultDialog({
+  snapshot,
+  match,
+  elapsed,
+  myProgress,
+  busy,
+  onRematch,
+  onLeave,
+}: {
+  snapshot: Snapshot;
+  match: Match;
+  elapsed: number;
+  myProgress: number;
+  busy: boolean;
+  onRematch: () => void;
+  onLeave: () => void;
+}) {
+  const dialogRef = useModalFocus<HTMLDivElement>();
+  const won = match.winnerId === snapshot.player.id;
+
+  return (
+    <div className="result-overlay">
+      <div
+        ref={dialogRef}
+        className={`result-card${won ? " won" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="result-title"
+        tabIndex={-1}
+      >
+        <div className="result-burst" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+        <span className="result-icon">
+          {won ? <UiIcon name="trophy" /> : <UiIcon name="swords" />}
+        </span>
+        <span className="result-kicker">{won ? "SORT SECURED" : "RACE COMPLETE"}</span>
+        <h2 id="result-title">
+          {won ? "YOU SORTED IT!" : `${match.opponent.name} GOT THERE FIRST`}
+        </h2>
+        <p>
+          {won
+            ? `A ${formatTime(elapsed)} finish in ${match.myMoves} moves.`
+            : `You made ${match.myMoves} moves and reached ${myProgress}%.`}
+        </p>
+        <div className="result-score">
+          <div className={won ? "winner" : ""}>
+            <Avatar player={snapshot.player} small />
+            <span>YOU</span>
+            <b>{match.myMoves}</b>
+            <small>MOVES</small>
+          </div>
+          <span>VS</span>
+          <div className={!won ? "winner" : ""}>
+            <Avatar player={match.opponent} small />
+            <span>{match.opponent.name}</span>
+            <b>{match.opponentMoves}</b>
+            <small>MOVES</small>
+          </div>
+        </div>
+        {match.status === "finished" ? (
+          <>
+            <button
+              type="button"
+              className="primary-result"
+              onClick={onRematch}
+              disabled={busy || match.myRematch}
+              data-autofocus
+            >
+              <UiIcon name="rematch" />
+              {match.myRematch
+                ? match.opponentRematch
+                  ? "STARTING…"
+                  : "WAITING FOR RIVAL…"
+                : "RACE AGAIN"}
+            </button>
+            <button type="button" className="secondary-result" onClick={onLeave} disabled={busy}>
+              BACK TO LOUNGE
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="primary-result"
+            onClick={onLeave}
+            disabled={busy}
+            data-autofocus
+          >
+            BACK TO LOUNGE
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -498,25 +710,29 @@ function HanoiBoardView({
 function Race({
   snapshot,
   now,
-  selectedPeg,
-  setSelectedPeg,
+  selectedBolt,
+  setSelectedBolt,
   busy,
   onMove,
+  onReset,
   onLeave,
   onRematch,
   onToast,
 }: {
   snapshot: Snapshot;
   now: number;
-  selectedPeg: number | null;
-  setSelectedPeg: (value: number | null) => void;
+  selectedBolt: number | null;
+  setSelectedBolt: (value: number | null) => void;
   busy: boolean;
   onMove: (from: number, to: number) => void;
+  onReset: () => void;
   onLeave: () => void;
   onRematch: () => void;
   onToast: (message: string) => void;
 }) {
   const match = snapshot.match!;
+  const [invalidBolt, setInvalidBolt] = useState<number | null>(null);
+  const invalidTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdown = Math.max(
     0,
     Math.min(3, Math.ceil((match.startsAt - now) / 1_000)),
@@ -524,37 +740,61 @@ function Race({
   const ended = match.status === "finished" || match.status === "abandoned";
   const playable = !ended && now >= match.startsAt && !busy;
   const elapsed = (match.finishedAt ?? now) - match.startsAt;
-  const myProgress = solvedProgress(match.myBoard, match.diskCount);
-  const opponentProgress = solvedProgress(match.opponentBoard, match.diskCount);
-  const won = ended && match.winnerId === snapshot.player.id;
+  const myProgressInfo = getBoltSortProgress(match.myBoard, match.colorCount);
+  const myProgress = myProgressInfo.percent;
+  const opponentProgress = boltSortProgress(match.opponentBoard, match.colorCount);
+  const deadlocked =
+    !ended &&
+    !isBoltSortSolved(match.myBoard, match.colorCount) &&
+    listLegalBoltMoves(match.myBoard, match.colorCount).length === 0;
 
-  const handlePeg = (peg: number) => {
-    if (!playable) return;
-    if (selectedPeg === null) {
-      if (!match.myBoard[peg].length) {
-        onToast("That peg is empty.");
+  useEffect(() => {
+    return () => {
+      if (invalidTimer.current) clearTimeout(invalidTimer.current);
+    };
+  }, []);
+
+  const flagInvalidBolt = (bolt: number) => {
+    setInvalidBolt(bolt);
+    if (invalidTimer.current) clearTimeout(invalidTimer.current);
+    invalidTimer.current = setTimeout(() => setInvalidBolt(null), 260);
+  };
+
+  const handleBolt = (bolt: number) => {
+    if (!playable || deadlocked) return;
+    if (selectedBolt === null) {
+      if (!match.myBoard[bolt].length) {
+        flagInvalidBolt(bolt);
+        onToast("That bolt is empty.");
         return;
       }
-      setSelectedPeg(peg);
+      if (isLockedBolt(match.myBoard[bolt])) {
+        flagInvalidBolt(bolt);
+        onToast("That color is already sorted and locked.");
+        return;
+      }
+      setSelectedBolt(bolt);
+      setInvalidBolt(null);
       return;
     }
-    if (selectedPeg === peg) {
-      setSelectedPeg(null);
+    if (selectedBolt === bolt) {
+      setSelectedBolt(null);
       return;
     }
-    const localResult = moveHanoiDisk(
+    const localResult = moveBoltSortNut(
       match.myBoard,
-      selectedPeg,
-      peg,
-      match.diskCount,
+      selectedBolt,
+      bolt,
+      match.colorCount,
     );
     if (!localResult.ok) {
-      onToast(localResult.reason);
+      flagInvalidBolt(bolt);
+      onToast(localResult.message);
       return;
     }
-    const from = selectedPeg;
-    setSelectedPeg(null);
-    onMove(from, peg);
+    const from = selectedBolt;
+    setSelectedBolt(null);
+    onMove(from, bolt);
   };
 
   return (
@@ -565,8 +805,8 @@ function Race({
         </button>
         <Brand />
         <div className="race-kind">
-          <span>{match.diskCount} RINGS</span>
-          <b>PAR {perfectMoveCount(match.diskCount)}</b>
+          <span>{match.colorCount} COLORS</span>
+          <b>{match.colorCount + 2} BOLTS</b>
         </div>
       </header>
 
@@ -581,11 +821,15 @@ function Race({
             {match.opponent.online ? "LIVE" : "RECONNECTING"}
           </i>
         </div>
-        <div className="opponent-mini">
-          <HanoiBoardView
+        <div
+          className="opponent-mini"
+          role="img"
+          aria-label={`Opponent board, ${opponentProgress} percent sorted`}
+        >
+          <BoltSortBoardView
             board={match.opponentBoard}
-            diskCount={match.diskCount}
-            selectedPeg={null}
+            colorCount={match.colorCount}
+            selectedBolt={null}
             interactive={false}
             mini
           />
@@ -603,8 +847,19 @@ function Race({
             <strong>{formatTime(elapsed)}</strong>
           </div>
           <div className="race-status-center">
-            <span className="progress-track"><i style={{ width: `${myProgress}%` }} /></span>
-            <b>{myProgress === 100 ? "TOWER COMPLETE" : "BUILD ON THE RIGHT"}</b>
+            <span
+              className="progress-track"
+              role="progressbar"
+              aria-label="Colors sorted"
+              aria-valuemin={0}
+              aria-valuemax={match.colorCount}
+              aria-valuenow={myProgressInfo.completedColors}
+            >
+              <i style={{ width: `${myProgress}%` }} />
+            </span>
+            <b>
+              {myProgressInfo.completedColors} / {match.colorCount} COLORS SORTED
+            </b>
           </div>
           <div>
             <span>MOVES</span>
@@ -614,29 +869,43 @@ function Race({
 
         <div className="board-wrap">
           <span className="you-badge">YOUR BOARD</span>
-          <HanoiBoardView
+          <BoltSortBoardView
             board={match.myBoard}
-            diskCount={match.diskCount}
-            selectedPeg={selectedPeg}
-            interactive={playable}
-            onPeg={handlePeg}
+            colorCount={match.colorCount}
+            selectedBolt={selectedBolt}
+            invalidBolt={invalidBolt}
+            interactive={playable && !deadlocked}
+            onBolt={handleBolt}
           />
         </div>
 
         <div className="move-prompt" aria-live="polite">
-          <span className={`prompt-icon${selectedPeg !== null ? " active" : ""}`}>
-            {selectedPeg !== null ? <UiIcon name="check" /> : <span>1</span>}
+          <span className={`prompt-icon${selectedBolt !== null || deadlocked ? " active" : ""}`}>
+            {deadlocked ? "!" : selectedBolt !== null ? <UiIcon name="check" /> : <span>1</span>}
           </span>
           <div>
-            <b>{selectedPeg !== null ? "RING LIFTED" : "YOUR MOVE"}</b>
+            <b>{deadlocked ? "NO MOVES LEFT" : selectedBolt !== null ? "NUT LIFTED" : "YOUR MOVE"}</b>
             <span>
-              {selectedPeg !== null
-                ? "Tap its destination peg"
-                : "Tap any stack to lift its top ring"}
+              {deadlocked
+                ? "Reset to the shared starting scramble"
+                : selectedBolt !== null
+                ? "Tap an empty bolt or the same color"
+                : "Tap any stack to lift its top nut"}
             </span>
           </div>
-          {selectedPeg !== null ? (
-            <button type="button" onClick={() => setSelectedPeg(null)}>CANCEL</button>
+          {deadlocked ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedBolt(null);
+                onReset();
+              }}
+              disabled={busy}
+            >
+              RESET
+            </button>
+          ) : selectedBolt !== null ? (
+            <button type="button" onClick={() => setSelectedBolt(null)}>CANCEL</button>
           ) : null}
         </div>
       </section>
@@ -646,58 +915,21 @@ function Race({
           <div className="countdown-card">
             <span>GET READY</span>
             <strong key={countdown}>{countdown}</strong>
-            <p>Same board. First tower wins.</p>
+            <p>Same scramble. First clean sort wins.</p>
           </div>
         </div>
       ) : null}
 
       {ended ? (
-        <div className="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title">
-          <div className={`result-card${won ? " won" : ""}`}>
-            <div className="result-burst" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-            <span className="result-icon">
-              {won ? <UiIcon name="trophy" /> : <UiIcon name="swords" />}
-            </span>
-            <span className="result-kicker">{won ? "TOWER SECURED" : "RACE COMPLETE"}</span>
-            <h2 id="result-title">{won ? "YOU STACKED IT!" : `${match.opponent.name} GOT THERE FIRST`}</h2>
-            <p>
-              {won
-                ? `A ${formatTime(elapsed)} finish in ${match.myMoves} moves.`
-                : `You made ${match.myMoves} moves and reached ${myProgress}%.`}
-            </p>
-            <div className="result-score">
-              <div className={won ? "winner" : ""}>
-                <Avatar player={snapshot.player} small />
-                <span>YOU</span>
-                <b>{match.myMoves}</b>
-                <small>MOVES</small>
-              </div>
-              <span>VS</span>
-              <div className={!won ? "winner" : ""}>
-                <Avatar player={match.opponent} small />
-                <span>{match.opponent.name}</span>
-                <b>{match.opponentMoves}</b>
-                <small>MOVES</small>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="primary-result"
-              onClick={onRematch}
-              disabled={busy || match.myRematch}
-            >
-              <UiIcon name="rematch" />
-              {match.myRematch
-                ? match.opponentRematch
-                  ? "STARTING…"
-                  : "WAITING FOR RIVAL…"
-                : "RACE AGAIN"}
-            </button>
-            <button type="button" className="secondary-result" onClick={onLeave} disabled={busy}>
-              BACK TO LOUNGE
-            </button>
-          </div>
-        </div>
+        <RaceResultDialog
+          snapshot={snapshot}
+          match={match}
+          elapsed={elapsed}
+          myProgress={myProgress}
+          busy={busy}
+          onRematch={onRematch}
+          onLeave={onLeave}
+        />
       ) : null}
     </main>
   );
@@ -714,9 +946,17 @@ function InviteSheet({
   onAccept: () => void;
   onDecline: () => void;
 }) {
+  const dialogRef = useModalFocus<HTMLElement>();
   return (
     <div className="sheet-backdrop">
-      <section className="invite-sheet" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+      <section
+        ref={dialogRef}
+        className="invite-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="invite-title"
+        tabIndex={-1}
+      >
         <div className="invite-versus">
           <Avatar player={invite.player} />
           <span><UiIcon name="swords" /></span>
@@ -725,13 +965,19 @@ function InviteSheet({
         <span className="section-kicker">INCOMING CHALLENGE</span>
         <h2 id="invite-title">{invite.player.name} WANTS TO RACE</h2>
         <p>
-          {invite.diskCount} rings · par {perfectMoveCount(invite.diskCount)} · shared countdown
+          {invite.colorCount} colors · {invite.colorCount + 2} bolts · shared countdown
         </p>
         <div className="invite-actions">
           <button type="button" className="decline-button" onClick={onDecline} disabled={busy}>
             <UiIcon name="close" /> DECLINE
           </button>
-          <button type="button" className="accept-button" onClick={onAccept} disabled={busy}>
+          <button
+            type="button"
+            className="accept-button"
+            onClick={onAccept}
+            disabled={busy}
+            data-autofocus
+          >
             <UiIcon name="swords" /> ACCEPT RACE
           </button>
         </div>
@@ -752,13 +998,16 @@ function NameDialog({
   onSave: (name: string) => void;
 }) {
   const [name, setName] = useState(player.name);
+  const dialogRef = useModalFocus<HTMLFormElement>(onClose);
   return (
     <div className="sheet-backdrop">
       <form
+        ref={dialogRef}
         className="name-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="name-title"
+        tabIndex={-1}
         onSubmit={(event) => {
           event.preventDefault();
           onSave(name);
@@ -774,6 +1023,7 @@ function NameDialog({
         <label>
           RACER NAME
           <input
+            data-autofocus
             value={name}
             maxLength={18}
             onChange={(event) => setName(event.target.value)}
@@ -788,31 +1038,88 @@ function NameDialog({
   );
 }
 
+function ConfirmLeaveDialog({
+  opponentName,
+  onCancel,
+  onConfirm,
+}: {
+  opponentName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useModalFocus<HTMLElement>(onCancel);
+  return (
+    <div className="sheet-backdrop">
+      <section
+        ref={dialogRef}
+        className="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="leave-title"
+        tabIndex={-1}
+      >
+        <span className="warning-icon">!</span>
+        <h2 id="leave-title">LEAVE THE RACE?</h2>
+        <p>Leaving now awards the win to {opponentName}.</p>
+        <div>
+          <button type="button" onClick={onCancel} data-autofocus>KEEP RACING</button>
+          <button type="button" className="danger-button" onClick={onConfirm}>
+            FORFEIT
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function GameApp() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState(4);
+  const [difficulty, setDifficulty] = useState<BoltSortTierId>("endurance");
   const [busy, setBusy] = useState(false);
-  const [selectedPeg, setSelectedPeg] = useState<number | null>(null);
+  const [moveReconciling, setMoveReconciling] = useState(false);
+  const [selectedBolt, setSelectedBolt] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [clockNow, setClockNow] = useState(0);
   const snapshotRef = useRef<Snapshot | null>(null);
   const busyRef = useRef(false);
+  const requestSequenceRef = useRef(0);
+  const appliedSequenceRef = useRef(0);
+  const moveQueueRef = useRef<QueuedMove[]>([]);
+  const moveSendingRef = useRef(false);
   const clockOffsetRef = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applySnapshot = useCallback((next: Snapshot) => {
     if (snapshotRef.current?.match?.id !== next.match?.id) {
-      setSelectedPeg(null);
+      moveQueueRef.current = [];
+      setSelectedBolt(null);
       setConfirmingLeave(false);
+      setMoveReconciling(false);
     }
+    if (next.incoming.length) setEditingName(false);
     snapshotRef.current = next;
     clockOffsetRef.current = next.serverNow - Date.now();
     setClockNow(next.serverNow);
     setSnapshot(next);
   }, []);
+
+  const applyNetworkSnapshot = useCallback(
+    (next: Snapshot, sequence: number) => {
+      if (
+        sequence < appliedSequenceRef.current ||
+        sequence < requestSequenceRef.current
+      ) {
+        return false;
+      }
+      appliedSequenceRef.current = sequence;
+      applySnapshot(next);
+      return true;
+    },
+    [applySnapshot],
+  );
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -825,33 +1132,81 @@ export function GameApp() {
       if (busyRef.current) return null;
       busyRef.current = true;
       setBusy(true);
+      const sequence = ++requestSequenceRef.current;
       try {
         const next = await gameRequest(action, payload);
-        applySnapshot(next);
+        applyNetworkSnapshot(next, sequence);
         return next;
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Try that again.");
-        if (action === "move") {
-          try {
-            applySnapshot(await gameRequest("sync"));
-          } catch {
-            // The next poll will retry reconciliation.
-          }
-        }
         return null;
       } finally {
         busyRef.current = false;
         setBusy(false);
       }
     },
-    [applySnapshot, showToast],
+    [applyNetworkSnapshot, showToast],
   );
+
+  const flushMoveQueue = useCallback(async () => {
+    if (moveSendingRef.current) return;
+    moveSendingRef.current = true;
+
+    try {
+      while (moveQueueRef.current.length) {
+        const move = moveQueueRef.current[0];
+        const sequence = ++requestSequenceRef.current;
+        try {
+          let next = await gameRequest("move", move);
+          if (moveQueueRef.current[0] === move) {
+            moveQueueRef.current.shift();
+          }
+
+          const current = snapshotRef.current;
+          const terminal =
+            next.match?.status === "finished" || next.match?.status === "abandoned";
+          if (terminal || next.match?.id !== move.matchId) {
+            moveQueueRef.current = [];
+          } else if (
+            current?.match?.id === next.match.id &&
+            current.match.myMoves > next.match.myMoves
+          ) {
+            next = {
+              ...next,
+              match: {
+                ...next.match,
+                myBoard: current.match.myBoard,
+                myMoves: current.match.myMoves,
+              },
+            };
+          }
+          applyNetworkSnapshot(next, sequence);
+        } catch (error) {
+          moveQueueRef.current = [];
+          setMoveReconciling(true);
+          showToast(error instanceof Error ? error.message : "Move lost. Resyncing…");
+          const syncSequence = ++requestSequenceRef.current;
+          try {
+            applyNetworkSnapshot(await gameRequest("sync"), syncSequence);
+          } catch {
+            showToast("Connection interrupted. Reconnecting…");
+          } finally {
+            setMoveReconciling(false);
+          }
+          break;
+        }
+      }
+    } finally {
+      moveSendingRef.current = false;
+    }
+  }, [applyNetworkSnapshot, showToast]);
 
   useEffect(() => {
     let cancelled = false;
+    const sequence = ++requestSequenceRef.current;
     gameRequest("session")
       .then((next) => {
-        if (!cancelled) applySnapshot(next);
+        if (!cancelled) applyNetworkSnapshot(next, sequence);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -861,7 +1216,7 @@ export function GameApp() {
     return () => {
       cancelled = true;
     };
-  }, [applySnapshot]);
+  }, [applyNetworkSnapshot]);
 
   const hasSnapshot = Boolean(snapshot);
   const matchId = snapshot?.match?.id ?? null;
@@ -878,9 +1233,15 @@ export function GameApp() {
       const delay = current?.match && !["finished", "abandoned"].includes(current.match.status)
         ? 700
         : 2_200;
-      if (document.visibilityState === "visible" && !busyRef.current) {
+      if (
+        document.visibilityState === "visible" &&
+        !busyRef.current &&
+        !moveSendingRef.current &&
+        moveQueueRef.current.length === 0
+      ) {
+        const sequence = ++requestSequenceRef.current;
         try {
-          applySnapshot(await gameRequest("sync"));
+          applyNetworkSnapshot(await gameRequest("sync"), sequence);
         } catch {
           // Presence is best effort; the next scheduled poll retries.
         }
@@ -893,7 +1254,7 @@ export function GameApp() {
       stopped = true;
       if (timeout) clearTimeout(timeout);
     };
-  }, [hasSnapshot, applySnapshot]);
+  }, [hasSnapshot, applyNetworkSnapshot]);
 
   useEffect(() => {
     if (!matchId || matchStatus === "finished" || matchStatus === "abandoned") {
@@ -919,7 +1280,7 @@ export function GameApp() {
     return (
       <main className="loading-screen">
         <Brand />
-        <div className="loading-stack" aria-hidden="true"><i /><i /><i /><i /></div>
+        <div className="loading-nuts" aria-hidden="true"><i /><i /><i /><i /></div>
         <span>{loadingError ? "OFFLINE" : "ENTERING THE LOUNGE"}</span>
         <h1>{loadingError ?? "FINDING RACERS…"}</h1>
         {loadingError ? (
@@ -935,18 +1296,52 @@ export function GameApp() {
     const current = snapshotRef.current;
     const match = current?.match;
     if (!current || !match) return;
-    const local = moveHanoiDisk(match.myBoard, from, to, match.diskCount);
+    if (moveQueueRef.current.length >= 6) {
+      showToast("Give the connection a beat…");
+      return;
+    }
+    const local = moveBoltSortNut(match.myBoard, from, to, match.colorCount);
     if (!local.ok) return;
     applySnapshot({
       ...current,
       match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 },
     });
-    void sendAction("move", {
+    moveQueueRef.current.push({
       matchId: match.id,
       from,
       to,
       expectedMoves: match.myMoves,
     });
+    void flushMoveQueue();
+  };
+
+  const leaveCurrentMatch = () => {
+    const currentMatchId = snapshotRef.current?.match?.id;
+    if (!currentMatchId) return;
+    moveQueueRef.current = [];
+    void sendAction("leave-match", { matchId: currentMatchId });
+  };
+
+  const resetCurrentBoard = async () => {
+    setMoveReconciling(true);
+    try {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (!moveSendingRef.current && moveQueueRef.current.length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      if (moveSendingRef.current || moveQueueRef.current.length) {
+        showToast("Still confirming your last move. Try reset again in a moment.");
+        return;
+      }
+      const match = snapshotRef.current?.match;
+      if (!match) return;
+      await sendAction("reset", {
+        matchId: match.id,
+        expectedMoves: match.myMoves,
+      });
+    } finally {
+      setMoveReconciling(false);
+    }
   };
 
   const activeRace = snapshot.match && !["finished", "abandoned"].includes(snapshot.match.status);
@@ -957,15 +1352,18 @@ export function GameApp() {
         <Race
           snapshot={snapshot}
           now={clockNow}
-          selectedPeg={selectedPeg}
-          setSelectedPeg={setSelectedPeg}
-          busy={busy}
+          selectedBolt={selectedBolt}
+          setSelectedBolt={setSelectedBolt}
+          busy={busy || moveReconciling}
           onMove={handleMove}
+          onReset={() => void resetCurrentBoard()}
           onLeave={() => {
             if (activeRace) setConfirmingLeave(true);
-            else void sendAction("leave-match");
+            else leaveCurrentMatch();
           }}
-          onRematch={() => void sendAction("rematch")}
+          onRematch={() =>
+            void sendAction("rematch", { matchId: snapshot.match?.id })
+          }
           onToast={showToast}
         />
       ) : (
@@ -975,7 +1373,7 @@ export function GameApp() {
           setDifficulty={setDifficulty}
           busy={busy}
           onChallenge={(playerId) =>
-            void sendAction("challenge", { playerId, diskCount: difficulty })
+            void sendAction("challenge", { playerId, tier: difficulty })
           }
           onCancel={(inviteId) => void sendAction("cancel-invite", { inviteId })}
           onEditName={() => setEditingName(true)}
@@ -1002,7 +1400,7 @@ export function GameApp() {
         />
       ) : null}
 
-      {editingName ? (
+      {editingName && !snapshot.incoming[0] ? (
         <NameDialog
           player={snapshot.player}
           busy={busy}
@@ -1014,27 +1412,15 @@ export function GameApp() {
         />
       ) : null}
 
-      {confirmingLeave ? (
-        <div className="sheet-backdrop">
-          <section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="leave-title">
-            <span className="warning-icon">!</span>
-            <h2 id="leave-title">LEAVE THE RACE?</h2>
-            <p>Leaving now awards the win to {snapshot.match?.opponent.name}.</p>
-            <div>
-              <button type="button" onClick={() => setConfirmingLeave(false)}>KEEP RACING</button>
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() => {
-                  setConfirmingLeave(false);
-                  void sendAction("leave-match");
-                }}
-              >
-                FORFEIT
-              </button>
-            </div>
-          </section>
-        </div>
+      {confirmingLeave && snapshot.match ? (
+        <ConfirmLeaveDialog
+          opponentName={snapshot.match.opponent.name}
+          onCancel={() => setConfirmingLeave(false)}
+          onConfirm={() => {
+            setConfirmingLeave(false);
+            leaveCurrentMatch();
+          }}
+        />
       ) : null}
 
       {toast ? <div className="toast" role="status">{toast}</div> : null}

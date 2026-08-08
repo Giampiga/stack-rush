@@ -22,28 +22,19 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "Peg Rush — Multiplayer Tower of Hanoi",
+    title: "Peg Rush — Multiplayer Color-Sort Race",
     description:
-      "Challenge someone online and race a live Tower of Hanoi match. No account needed.",
+      "Challenge someone online and race the same live color-sort puzzle. No account needed.",
     applicationName: "Peg Rush",
     openGraph: {
-      title: "Peg Rush — Race the Tower",
-      description: "Pick a rival. Stack faster. No account needed.",
+      title: "Peg Rush — Race the Sort",
+      description: "Pick a rival. Sort faster. No account needed.",
       type: "website",
-      images: [
-        {
-          url: "/og.png",
-          width: 1731,
-          height: 909,
-          alt: "Peg Rush — Pick a rival. Race the puzzle.",
-        },
-      ],
     },
     twitter: {
-      card: "summary_large_image",
-      title: "Peg Rush — Race the Tower",
-      description: "Pick a rival. Stack faster. No account needed.",
-      images: ["/og.png"],
+      card: "summary",
+      title: "Peg Rush — Race the Sort",
+      description: "Pick a rival. Sort faster. No account needed.",
     },
   };
 }

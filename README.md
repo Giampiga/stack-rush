@@ -1,17 +1,17 @@
 # Peg Rush
 
-Peg Rush is a no-login, mobile-first multiplayer Tower of Hanoi race. Guests
-enter a live lounge, challenge another online player, and solve identical boards
+Peg Rush is a no-login, mobile-first multiplayer color-sort race. Guests enter a
+live lounge, challenge another online player, and sort identical bolt boards
 against a shared countdown. The first server-validated solution wins.
 
 ## Highlights
 
 - Anonymous guest sessions with editable display names
 - Live player presence, invitations, declines, cancellations, and expiry
-- Three race levels: 3, 4, or 5 rings
+- Four race tiers from 6 colors and 8 bolts to 15 colors and 17 bolts
+- One-nut tap-to-lift / tap-to-place moves with two spare bolts
 - Server-authoritative legal moves, timers, results, and win records
 - Opponent progress, rematches, reconnect support, and confirmed forfeits
-- Touch-friendly tap-to-lift / tap-to-place controls
 - D1-backed durable match state and Cloudflare-compatible output
 
 ## Development

@@ -37,7 +37,7 @@ while (Date.now() - startedAt < 90_000) {
       (player) => player.name === targetName && player.available,
     );
     if (target) {
-      await post("challenge", { playerId: target.id, diskCount: 3 });
+      await post("challenge", { playerId: target.id, tier: "endurance" });
       challenged = true;
       console.log(`Challenge sent to ${targetName}`);
     }

@@ -1,5 +1,10 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const schemaMigrations = sqliteTable("schema_migrations", {
+  id: text("id").primaryKey(),
+  appliedAt: integer("applied_at").notNull(),
+});
+
 export const players = sqliteTable(
   "players",
   {
@@ -25,7 +30,7 @@ export const invites = sqliteTable(
     id: text("id").primaryKey(),
     fromPlayerId: text("from_player_id").notNull(),
     toPlayerId: text("to_player_id").notNull(),
-    diskCount: integer("disk_count").notNull(),
+    colorCount: integer("disk_count").notNull(),
     status: text("status").notNull().default("pending"),
     createdAt: integer("created_at").notNull(),
     respondedAt: integer("responded_at"),
@@ -61,7 +66,7 @@ export const matches = sqliteTable(
     id: text("id").primaryKey(),
     playerOneId: text("player_one_id").notNull(),
     playerTwoId: text("player_two_id").notNull(),
-    diskCount: integer("disk_count").notNull(),
+    colorCount: integer("disk_count").notNull(),
     status: text("status").notNull().default("countdown"),
     startsAt: integer("starts_at").notNull(),
     winnerId: text("winner_id"),
@@ -81,3 +86,35 @@ export const matches = sqliteTable(
     index("idx_matches_player_two").on(table.playerTwoId, table.updatedAt),
   ],
 );
+
+export const matchResults = sqliteTable("match_results", {
+  matchId: text("match_id").primaryKey(),
+  winnerId: text("winner_id").notNull(),
+  loserId: text("loser_id").notNull(),
+  claimId: text("claim_id").notNull().unique(),
+  applied: integer("applied").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  appliedAt: integer("applied_at"),
+});
+
+export const guestSessionCreations = sqliteTable(
+  "guest_session_creations",
+  {
+    nonce: text("nonce").primaryKey(),
+    clientKeyHash: text("client_key_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_guest_session_creations_created").on(table.createdAt),
+    index("idx_guest_session_creations_client").on(
+      table.clientKeyHash,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const maintenanceLeases = sqliteTable("maintenance_leases", {
+  key: text("key").primaryKey(),
+  runAfter: integer("run_after").notNull(),
+  claimId: text("claim_id").notNull(),
+});
