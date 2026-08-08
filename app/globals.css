@@ -761,9 +761,19 @@ input:focus-visible {
 .accept-button, .save-name { background: var(--orange); color: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
 
 .name-dialog { text-align: left; }
-.name-dialog > .avatar { margin-bottom: 24px; }
+.name-dialog-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  margin-bottom: var(--space-5);
+  padding-right: 44px;
+}
+.name-dialog-identity .section-kicker { line-height: 1.25; }
 .name-dialog h2 { margin-top: 8px; font-size: 29px; }
-.dialog-close { position: absolute; top: 16px; right: 16px; display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; border: 1.5px solid var(--ink); border-radius: 50%; background: white; cursor: pointer; }
+.dialog-close { position: absolute; top: 12px; right: 12px; display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.dialog-close::before { content: ""; position: absolute; inset: 4px; border: 1.5px solid var(--ink); border-radius: 50%; background: white; }
+.dialog-close .ui-icon { position: relative; z-index: 1; }
 .name-dialog label { display: grid; gap: 8px; font-size: 9px; font-weight: 900; letter-spacing: .1em; }
 .name-dialog input { width: 100%; border: 2px solid var(--ink); border-radius: 12px; background: white; padding: 14px 15px; font-size: 17px; font-weight: 800; }
 .save-name { width: 100%; margin-top: var(--space-4); }

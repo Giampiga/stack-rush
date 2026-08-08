@@ -1016,8 +1016,10 @@ function NameDialog({
         <button type="button" className="dialog-close" onClick={onClose} aria-label="Close">
           <UiIcon name="close" />
         </button>
-        <Avatar player={{ ...player, name: name || player.name }} />
-        <span className="section-kicker">YOUR GUEST NAME</span>
+        <div className="name-dialog-identity">
+          <Avatar player={{ ...player, name: name || player.name }} />
+          <span className="section-kicker">YOUR GUEST NAME</span>
+        </div>
         <h2 id="name-title">MAKE IT YOURS</h2>
         <p>No account needed. This name is visible to people in the lounge.</p>
         <label>

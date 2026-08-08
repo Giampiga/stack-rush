@@ -70,4 +70,29 @@
 - Browser console: zero warnings and zero errors after the final responsive captures.
 - `npm test`, `npm run lint`, `npx tsc --noEmit`, and `git diff --check` all pass.
 
+## Profile identity spacing — August 8, 2026
+
+### Evidence and states
+
+- User-highlighted reference crop: `.qa/profile-spacing/user-reference.png`.
+- Reproduced profile editor before the fix at 390 × 844 CSS px: `.qa/profile-spacing/profile-dialog-before-390x844.png`.
+- Verified profile editor after the fix at 390 × 844 CSS px: `.qa/profile-spacing/profile-dialog-after-390x844.png`.
+- Combined before / after review: `.qa/profile-spacing/profile-dialog-before-after-390x844.png`.
+- Responsive verification after the fix: `.qa/profile-spacing/profile-dialog-after-320x568.png` and `.qa/profile-spacing/profile-dialog-after-1280x900.png`.
+
+### Findings and fixes
+
+1. P2 — The avatar and “YOUR GUEST NAME” label were adjacent inline-level elements. The rotated avatar’s visual bounds extended 0.86 px into the label, and its 3 px hard shadow made the collision more obvious in the user’s capture.
+2. Fixed by grouping the avatar and label in a dedicated flex identity row with a 16 px design-token gap, a 24 px bottom rhythm, and reserved space for the close control.
+3. At 390 × 844 the measured avatar-to-label gap is now 15.14 px after the avatar transform, with zero overlap. At 320 × 568 the same gap is preserved and the label retains 14.16 px of clearance from the expanded close-button hit area.
+4. No horizontal overflow appears at 320, 390, or 1280 px. The dialog’s reading order, focus behavior, input, save action, and close action are unchanged.
+5. P2 — The visible 36 px close circle also used a 36 × 36 px hit area. Expanded the button to a 44 × 44 px target while preserving the original 36 px circle with an inset visual layer.
+
+### Delegated multiplayer QA
+
+- Two isolated anonymous clients completed the full automated multiplayer suite: 8 / 8 passed.
+- Browser self-play verified presence, challenge, acceptance, countdown lockout, invalid-move recovery, a legal move, canceling the leave dialog, and forfeit back to the lounge.
+- API self-play additionally verified a full solve, reset, rematch, simultaneous final moves, exactly-once statistics, stale-action rejection, and challenge accept / cancel races.
+- Browser console during the delegated pass: zero warnings and zero errors. No P0, P1, or P2 multiplayer failures were found.
+
 final result: passed
