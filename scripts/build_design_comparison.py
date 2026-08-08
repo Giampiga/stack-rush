@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw
 source_path = Path(sys.argv[1])
 implementation_path = Path(sys.argv[2])
 output_path = Path(sys.argv[3])
+source_label = sys.argv[4] if len(sys.argv) > 4 else "REFERENCE MECHANIC"
+implementation_label = sys.argv[5] if len(sys.argv) > 5 else "PEG RUSH IMPLEMENTATION"
 
 source = Image.open(source_path).convert("RGB")
 implementation = Image.open(implementation_path).convert("RGB")
@@ -31,8 +33,8 @@ draw = ImageDraw.Draw(canvas)
 source_x = gutter
 implementation_x = source_x + source.width + gutter
 image_y = label_height + gutter
-draw.text((source_x, 17), "REFERENCE MECHANIC", fill="#fffaf1")
-draw.text((implementation_x, 17), "PEG RUSH IMPLEMENTATION", fill="#fffaf1")
+draw.text((source_x, 17), source_label, fill="#fffaf1")
+draw.text((implementation_x, 17), implementation_label, fill="#fffaf1")
 canvas.paste(source, (source_x, image_y))
 canvas.paste(implementation, (implementation_x, image_y))
 output_path.parent.mkdir(parents=True, exist_ok=True)
