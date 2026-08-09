@@ -15,13 +15,13 @@ import {
   isValidHanoiBoard,
 } from "../lib/hanoi.ts";
 
-const baseUrl = process.env.PEG_RUSH_BASE_URL ?? "http://localhost:3000";
+const baseUrl = process.env.STACK_RUSH_BASE_URL ?? "http://localhost:3000";
 
 class GuestAgent {
   cookie = "";
   userAgent;
 
-  constructor(userAgent = `PegRushTest/${crypto.randomUUID()}`) {
+  constructor(userAgent = `StackRushTest/${crypto.randomUUID()}`) {
     this.userAgent = userAgent;
   }
 
@@ -546,20 +546,20 @@ test("request parsing rejects non-objects and oversized chunked bodies without 5
 
   const malformedCookie = await rawPost(JSON.stringify({ action: "session" }), {
     Cookie: "broken=%E0%A4%A; unrelated=ok",
-    "User-Agent": `PegRushMalformedCookie/${crypto.randomUUID()}`,
+    "User-Agent": `StackRushMalformedCookie/${crypto.randomUUID()}`,
   });
   assert.equal(malformedCookie.status, 201);
   assert.equal(malformedCookie.data.ok, true);
 
   const anonymousSync = await rawPost(JSON.stringify({ action: "sync" }), {
-    "User-Agent": `PegRushNoSession/${crypto.randomUUID()}`,
+    "User-Agent": `StackRushNoSession/${crypto.randomUUID()}`,
   });
   assert.equal(anonymousSync.status, 401);
   assert.equal(anonymousSync.data.code, "SESSION_EXPIRED");
 });
 
 test("anonymous session creation is capped atomically per derived client", async () => {
-  const userAgent = `PegRushLimiter/${crypto.randomUUID()}`;
+  const userAgent = `StackRushLimiter/${crypto.randomUUID()}`;
   const statuses = [];
   for (let attempt = 0; attempt < 49; attempt += 1) {
     const result = await rawPost(JSON.stringify({ action: "session" }), {

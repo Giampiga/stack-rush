@@ -28,7 +28,7 @@ Task {
     let durationSeconds = CMTimeGetSeconds(duration)
     let tracks = try await asset.loadTracks(withMediaType: .video)
     guard let track = tracks.first else {
-      throw NSError(domain: "PegRushReference", code: 1, userInfo: [
+      throw NSError(domain: "StackRushReference", code: 1, userInfo: [
         NSLocalizedDescriptionKey: "The recording has no video track."
       ])
     }
@@ -62,7 +62,7 @@ Task {
       let image = try await generator.image(at: requested).image
       let bitmap = NSBitmapImageRep(cgImage: image)
       guard let data = bitmap.representation(using: .png, properties: [:]) else {
-        throw NSError(domain: "PegRushReference", code: 2, userInfo: [
+        throw NSError(domain: "StackRushReference", code: 2, userInfo: [
           NSLocalizedDescriptionKey: "Could not encode frame \(index)."
         ])
       }

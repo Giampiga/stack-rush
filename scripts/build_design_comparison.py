@@ -8,7 +8,7 @@ source_path = Path(sys.argv[1])
 implementation_path = Path(sys.argv[2])
 output_path = Path(sys.argv[3])
 source_label = sys.argv[4] if len(sys.argv) > 4 else "REFERENCE MECHANIC"
-implementation_label = sys.argv[5] if len(sys.argv) > 5 else "PEG RUSH IMPLEMENTATION"
+implementation_label = sys.argv[5] if len(sys.argv) > 5 else "STACK RUSH IMPLEMENTATION"
 
 source = Image.open(source_path).convert("RGB")
 implementation = Image.open(implementation_path).convert("RGB")

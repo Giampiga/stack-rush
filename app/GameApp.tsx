@@ -247,13 +247,13 @@ function Avatar({ player, small = false }: { player: Player; small?: boolean }) 
 
 function Brand() {
   return (
-    <div className="brand" aria-label="Peg Rush">
+    <div className="brand" aria-label="Stack Rush">
       <span className="brand-mark" aria-hidden="true">
         <i />
         <i />
         <i />
       </span>
-      <span>PEG RUSH</span>
+      <span>STACK RUSH</span>
     </div>
   );
 }
@@ -274,10 +274,10 @@ function ModePicker({ value, onChange }: { value: GameMode; onChange: (value: Ga
   return (
     <div className="mode-picker" role="radiogroup" aria-label="Puzzle mode">
       <button type="button" role="radio" aria-checked={value === "sort"} className={value === "sort" ? "active" : ""} onClick={() => onChange("sort")}>
-        <span aria-hidden="true">⬢</span><b>NUT SORT</b><small>COLOR STACKS</small>
+        <span aria-hidden="true">⬢</span><b>NUTS &amp; BOLTS</b><small>COLOR STACKS</small>
       </button>
       <button type="button" role="radio" aria-checked={value === "hanoi"} className={value === "hanoi" ? "active" : ""} onClick={() => onChange("hanoi")}>
-        <span aria-hidden="true">≋</span><b>TOWER RACE</b><small>HANOI RINGS</small>
+        <span aria-hidden="true">≋</span><b>TOWER RACE</b><small>TOWER OF HANOI</small>
       </button>
     </div>
   );
@@ -383,7 +383,7 @@ function Lobby({
 
   const shareLounge = async () => {
     const shareData = {
-      title: "Peg Rush",
+      title: "Stack Rush",
       text: "Race me in a live puzzle sprint—no account needed.",
       url: window.location.href,
     };

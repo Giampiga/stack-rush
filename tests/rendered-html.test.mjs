@@ -15,13 +15,13 @@ async function render() {
   );
 }
 
-test("server-renders the Peg Rush product shell and metadata", async () => {
+test("server-renders the Stack Rush product shell and metadata", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>Peg Rush — Live Multiplayer Puzzle Races<\/title>/i);
-  assert.match(html, /PEG RUSH/);
+  assert.match(html, /<title>Stack Rush — Live Multiplayer Puzzle Races<\/title>/i);
+  assert.match(html, /STACK RUSH/);
   assert.match(html, /ENTERING THE LOUNGE/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Starter Project/i);
 });
@@ -34,7 +34,9 @@ test("starter preview assets and dependencies are fully removed", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /<GameApp \/>/);
-  assert.match(layout, /Peg Rush/);
+  assert.match(layout, /Stack Rush/);
+  assert.match(gameApp, /NUTS &amp; BOLTS/);
+  assert.match(gameApp, /TOWER OF HANOI/);
   assert.match(gameApp, /PRACTICE SOLO/);
   assert.match(gameApp, /matching top group/);
   assert.match(gameApp, />RESET</);

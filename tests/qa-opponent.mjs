@@ -1,4 +1,4 @@
-const baseUrl = process.env.PEG_RUSH_BASE_URL ?? "http://localhost:3000";
+const baseUrl = process.env.STACK_RUSH_BASE_URL ?? "http://localhost:3000";
 let cookie = "";
 
 async function post(action, payload = {}) {

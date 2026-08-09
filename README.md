@@ -1,8 +1,9 @@
-# Peg Rush
+# Stack Rush
 
-Peg Rush is a no-login, mobile-first multiplayer color-sort race. Guests enter a
-live lounge, challenge another online player, and sort identical bolt boards
-against a shared countdown. The first server-validated solution wins.
+Stack Rush is a no-login, mobile-first multiplayer puzzle race. Guests enter a
+live lounge, challenge another online player, and compete in Nuts & Bolts or
+Tower of Hanoi against a shared countdown. The first server-validated solution
+wins.
 
 ## Highlights
 

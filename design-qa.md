@@ -1,4 +1,4 @@
-# Peg Rush design QA
+# Stack Rush design QA
 
 ## Visual truth and evidence
 
@@ -15,11 +15,11 @@
 | --- | --- |
 | Mechanic | Passed. Both views use 17 bolts in a 6 / 6 / 5 arrangement, capacity four, two empty spare bolts, one top-nut move at a time, and same-color destination matching. |
 | Difficulty and density | Passed. The implementation uses all 15 colors. Every starting stack contains four alternating color segments across three colors, and the generated Endurance solution is 60 legal moves. |
-| Typography | Passed. The existing Peg Rush compact uppercase labels, heavy score numerals, and legible instructional copy remain consistent across the multiplayer shell and board. |
+| Typography | Passed. The existing Stack Rush compact uppercase labels, heavy score numerals, and legible instructional copy remain consistent across the multiplayer shell and board. |
 | Spacing and sizing | Passed. At 320 × 568 the page has no vertical overflow; the board ends at 466 px and the move prompt ends at 516.5 px. All 17 bolt controls fit above the fold and the minimum control width is 44.328 px. At 390 × 844 the board ends at 684.875 px and the prompt ends at 739.375 px. |
-| Colors and tokens | Passed. The requested Peg Rush cream-paper, ink-outline, orange/lime, and hard-shadow system is unchanged. Fifteen logical colors render as fifteen distinct nut styles. The reference's purple theme was intentionally not copied because the user asked to preserve the existing frontend design. |
+| Colors and tokens | Passed. The requested Stack Rush cream-paper, ink-outline, orange/lime, and hard-shadow system is unchanged. Fifteen logical colors render as fifteen distinct nut styles. The reference's purple theme was intentionally not copied because the user asked to preserve the existing frontend design. |
 | Assets and imagery | Passed. The board, loading art, waiting art, brand mark, and opponent preview all use the same nut-and-bolt vocabulary. No retired ring/tower imagery remains in the visible product. |
-| Copy | Passed. Product text says “color-sort” and never presents Peg Rush as affiliated with the reference game. Invitations explicitly say no account is required. |
+| Copy | Passed. Product text says “color-sort” and never presents Stack Rush as affiliated with the reference game. Invitations explicitly say no account is required. |
 | Multiplayer additions | Passed. Opponent identity, opponent board, progress, timer, and moves fit around the reference-density board without changing the core interaction. |
 
 ## Interaction and accessibility QA
@@ -47,7 +47,7 @@
 
 ### Evidence and states
 
-- Visual source: the already-approved Peg Rush implementation before this pass. The style, composition, typography, colors, borders, radii, and game density were held constant.
+- Visual source: the already-approved Stack Rush implementation before this pass. The style, composition, typography, colors, borders, radii, and game density were held constant.
 - Lounge before / after at 390 × 844 CSS px: `.qa/spacing/lounge-before-390x844.png`, `.qa/spacing/lounge-after-390x844.png`, and combined comparison `.qa/spacing/lounge-before-after-390x844.png`.
 - Name editor before / after at 390 × 844 CSS px: `.qa/spacing/name-dialog-before-390x844.png`, `.qa/spacing/name-dialog-after-390x844.png`, and combined comparison `.qa/spacing/name-dialog-before-after-390x844.png`.
 - Active Endurance race after polish at 390 × 844 and 320 × 568 CSS px: `.qa/spacing/race-after-390x844.png` and `.qa/spacing/race-after-320x568.png`.
