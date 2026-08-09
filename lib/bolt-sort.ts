@@ -75,6 +75,7 @@ export type BoltSortMoveFailureReason =
   | "source-empty"
   | "source-locked"
   | "target-full"
+  | "group-too-large"
   | "color-mismatch";
 
 export type BoltSortMoveResult =
@@ -82,6 +83,7 @@ export type BoltSortMoveResult =
       ok: true;
       board: BoltSortBoard;
       color: BoltColor;
+      count: number;
       from: number;
       to: number;
     }
@@ -259,14 +261,32 @@ export function moveBoltNut(
     };
   }
 
+  let movingCount = 1;
+  while (
+    movingCount < source.length &&
+    source[source.length - 1 - movingCount] === movingColor
+  ) {
+    movingCount += 1;
+  }
+  const openSpaces = BOLT_CAPACITY - target.length;
+  if (movingCount > openSpaces) {
+    return {
+      ok: false,
+      board,
+      reason: "group-too-large",
+      message: `${movingCount} matching nuts need ${movingCount} open spaces.`,
+    };
+  }
+
   const nextBoard = cloneBoard(board);
-  nextBoard[from].pop();
-  nextBoard[to].push(movingColor);
+  const movingNuts = nextBoard[from].splice(-movingCount);
+  nextBoard[to].push(...movingNuts);
 
   return {
     ok: true,
     board: nextBoard,
     color: movingColor,
+    count: movingCount,
     from,
     to,
   };
@@ -274,6 +294,16 @@ export function moveBoltNut(
 
 export const moveBoltPiece = moveBoltNut;
 export const moveBoltSortNut = moveBoltNut;
+
+export function topBoltGroupSize(bolt: readonly BoltColor[]): number {
+  const color = bolt.at(-1);
+  if (color === undefined) return 0;
+  let count = 1;
+  while (count < bolt.length && bolt[bolt.length - 1 - count] === color) {
+    count += 1;
+  }
+  return count;
+}
 
 export function listLegalBoltMoves(
   board: BoltSortBoard,
@@ -405,8 +435,13 @@ function applyReverseShuffle(
   shuffled[from].pop();
   shuffled[to].push(color);
 
-  const inverse = moveBoltNut(shuffled, to, from);
-  if (!inverse.ok || boardSignature(inverse.board) !== boardSignature(board)) {
+  const inverse = cloneBoard(shuffled);
+  const inverseColor = inverse[to].pop();
+  if (inverseColor === undefined) {
+    throw new Error("Reverse shuffle lost its inverse nut");
+  }
+  inverse[from].push(inverseColor);
+  if (boardSignature(inverse) !== boardSignature(board)) {
     throw new Error("Reverse shuffle did not produce a legal inverse move");
   }
 
@@ -414,6 +449,125 @@ function applyReverseShuffle(
     board: shuffled,
     solution: [{ from: to, to: from }, ...solution],
   };
+}
+
+const groupedSolutionCache = new Map<string, BoltSortMove[]>();
+
+function canonicalBoardSignature(board: BoltSortBoard): string {
+  const names = new Map<BoltColor, number>();
+  let nextName = 0;
+  return JSON.stringify(
+    board.map((bolt) =>
+      bolt.map((color) => {
+        if (!names.has(color)) names.set(color, nextName++);
+        return names.get(color);
+      }),
+    ),
+  );
+}
+
+function solveGroupedComponent(initial: BoltSortBoard): BoltSortMove[] {
+  const cacheKey = canonicalBoardSignature(initial);
+  const cached = groupedSolutionCache.get(cacheKey);
+  if (cached) return cached.map((move) => ({ ...move }));
+
+  const start = boardSignature(initial);
+  const queue: BoltSortBoard[] = [cloneBoard(initial)];
+  const parents = new Map<
+    string,
+    { previous: string | null; move: BoltSortMove | null; board: BoltSortBoard }
+  >([[start, { previous: null, move: null, board: cloneBoard(initial) }]]);
+  let solvedSignature: string | null = null;
+
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const board = queue[cursor];
+    const signature = boardSignature(board);
+    if (isBoltSortSolved(board)) {
+      solvedSignature = signature;
+      break;
+    }
+    for (const move of listLegalBoltMoves(board)) {
+      const result = moveBoltNut(board, move.from, move.to);
+      if (!result.ok) continue;
+      const nextSignature = boardSignature(result.board);
+      if (parents.has(nextSignature)) continue;
+      parents.set(nextSignature, {
+        previous: signature,
+        move,
+        board: result.board,
+      });
+      queue.push(result.board);
+    }
+  }
+
+  if (!solvedSignature) {
+    throw new Error("Unable to find a grouped solution for the generated puzzle");
+  }
+
+  const reversed: BoltSortMove[] = [];
+  let cursor: string | null = solvedSignature;
+  while (cursor) {
+    const entry = parents.get(cursor);
+    if (!entry) throw new Error("Grouped solution path is incomplete");
+    if (entry.move) reversed.push(entry.move);
+    cursor = entry.previous;
+  }
+  const solution = reversed.reverse();
+  groupedSolutionCache.set(cacheKey, solution);
+  return solution.map((move) => ({ ...move }));
+}
+
+function colorComponents(board: BoltSortBoard): BoltColor[][] {
+  const remaining = new Set(board.flat());
+  const components: BoltColor[][] = [];
+  while (remaining.size) {
+    const first = remaining.values().next().value as BoltColor;
+    const component = new Set<BoltColor>([first]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const bolt of board) {
+        if (!bolt.some((color) => component.has(color))) continue;
+        for (const color of bolt) {
+          if (!component.has(color)) {
+            component.add(color);
+            changed = true;
+          }
+        }
+      }
+    }
+    for (const color of component) remaining.delete(color);
+    components.push([...component]);
+  }
+  return components;
+}
+
+function groupedSolution(initial: BoltSortBoard): BoltSortMove[] {
+  let board = cloneBoard(initial);
+  const solution: BoltSortMove[] = [];
+  for (const colors of colorComponents(board)) {
+    const colorSet = new Set(colors);
+    const filled = board.flatMap((bolt, index) =>
+      bolt.some((color) => colorSet.has(color)) ? [index] : [],
+    );
+    const empty = board.flatMap((bolt, index) => bolt.length === 0 ? [index] : []);
+    if (colors.length !== 3 || filled.length !== 3 || empty.length !== 2) {
+      throw new Error("Generated color groups are not isolated correctly");
+    }
+    const indices = [...filled, ...empty];
+    const localSolution = solveGroupedComponent(indices.map((index) => [...board[index]]));
+    for (const move of localSolution) {
+      const globalMove = { from: indices[move.from], to: indices[move.to] };
+      const result = moveBoltNut(board, globalMove.from, globalMove.to);
+      if (!result.ok) throw new Error("Generated grouped solution became illegal");
+      board = result.board;
+      solution.push(globalMove);
+    }
+  }
+  if (!isBoltSortSolved(board)) {
+    throw new Error("Generated grouped solution did not solve the puzzle");
+  }
+  return solution;
 }
 
 // Local indices 0-2 are solved color bolts and 3-4 are empty workspaces.
@@ -478,6 +632,8 @@ export function createBoltSortPuzzle(
   ) {
     throw new Error("Unable to generate a shuffled bolt-sort puzzle");
   }
+
+  solution = groupedSolution(board);
 
   return {
     version: 1,

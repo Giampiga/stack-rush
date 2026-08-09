@@ -61,7 +61,7 @@ test("validates color counts, capacity, and the two-spare-bolt shape", () => {
   assert.equal(isValidBoltSortBoard(twoColorBoard, Number.NaN), false);
 });
 
-test("moves exactly one matching top nut and never mutates its input", () => {
+test("moves the entire matching top group and never mutates its input", () => {
   const original = twoColorBoard.map((bolt) => [...bolt]);
   const result = moveBoltNut(original, 0, 1);
 
@@ -70,14 +70,15 @@ test("moves exactly one matching top nut and never mutates its input", () => {
 
   assert.deepEqual(original, twoColorBoard);
   assert.equal(result.color, "orange");
+  assert.equal(result.count, 2);
   assert.deepEqual(result.board, [
-    ["coral", "coral", "orange"],
-    ["orange", "orange", "orange"],
+    ["coral", "coral"],
+    ["orange", "orange", "orange", "orange"],
     ["coral", "coral"],
     [],
   ]);
-  assert.equal(result.board[0].length, original[0].length - 1);
-  assert.equal(result.board[1].length, original[1].length + 1);
+  assert.equal(result.board[0].length, original[0].length - 2);
+  assert.equal(result.board[1].length, original[1].length + 2);
 });
 
 test("rejects empty, same, mismatched, full, invalid, and locked moves", () => {
@@ -95,16 +96,13 @@ test("rejects empty, same, mismatched, full, invalid, and locked moves", () => {
   const first = moveBoltNut(twoColorBoard, 0, 1);
   assert.equal(first.ok, true);
   if (!first.ok) return;
-  const second = moveBoltNut(first.board, 0, 1);
-  assert.equal(second.ok, true);
-  if (!second.ok) return;
-  assert.equal(isBoltLocked(second.board[1]), true);
+  assert.equal(isBoltLocked(first.board[1]), true);
   assert.equal(
-    failureReason(moveBoltNut(second.board, 1, 3)),
+    failureReason(moveBoltNut(first.board, 1, 3)),
     "source-locked",
   );
   assert.equal(
-    failureReason(moveBoltNut(second.board, 2, 1)),
+    failureReason(moveBoltNut(first.board, 2, 1)),
     "target-full",
   );
 
@@ -172,7 +170,8 @@ test("every tier generates deeply mixed bolts and exactly two empty bolts", () =
     assert.equal(puzzle.board.filter((bolt) => bolt.length === 0).length, 2);
     assert.equal(isValidBoltSortBoard(puzzle.board, config.colorCount), true);
     assert.equal(isBoltSortSolved(puzzle.board), false);
-    assert.equal(puzzle.solution.length, config.shuffleMoves);
+    assert.ok(puzzle.solution.length > config.colorCount);
+    assert.ok(puzzle.solution.length < config.shuffleMoves);
     const filledBolts = puzzle.board.filter((bolt) => bolt.length > 0);
     assert.equal(filledBolts.length, config.colorCount);
     assert.ok(filledBolts.every((bolt) => bolt.length === BOLT_CAPACITY));

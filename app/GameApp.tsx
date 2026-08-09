@@ -6,22 +6,27 @@ import {
   BOLT_COLORS,
   BOLT_SORT_TIERS,
   boltSortProgress,
+  createBoltSortPuzzle,
   getBoltSortProgress,
   isBoltSortSolved,
   isLockedBolt,
   listLegalBoltMoves,
   moveBoltSortNut,
+  topBoltGroupSize,
   type BoltColor,
   type BoltSortBoard,
   type BoltSortTierId,
 } from "@/lib/bolt-sort";
 import {
   HANOI_LEVELS,
+  createHanoiBoard,
   hanoiProgress,
+  isHanoiSolved,
   moveHanoiDisk,
   type HanoiBoard,
   type HanoiTierId,
 } from "@/lib/hanoi";
+import { raceElapsed } from "@/lib/race-timer";
 
 type GameMode = "sort" | "hanoi";
 
@@ -56,6 +61,8 @@ type MatchBase = {
   myRematch: boolean;
   opponentRematch: boolean;
   opponent: Player & { online: boolean };
+  practice?: boolean;
+  optimisticFinishedAt?: number | null;
 };
 
 type SortMatch = MatchBase & {
@@ -78,6 +85,11 @@ type HanoiMatch = MatchBase & {
 };
 
 type Match = SortMatch | HanoiMatch;
+
+type PracticeSession = {
+  snapshot: Snapshot;
+  initialBoard: BoltSortBoard | HanoiBoard;
+};
 
 type Snapshot = {
   serverNow: number;
@@ -350,6 +362,7 @@ function Lobby({
   busy,
   onChallenge,
   onCancel,
+  onPractice,
   onEditName,
   onToast,
 }: {
@@ -361,6 +374,7 @@ function Lobby({
   busy: boolean;
   onChallenge: (playerId: string) => void;
   onCancel: (inviteId: string) => void;
+  onPractice: () => void;
   onEditName: () => void;
   onToast: (message: string) => void;
 }) {
@@ -422,9 +436,14 @@ function Lobby({
             Same puzzle. Same countdown. First to finish takes the win.
           </p>
         </div>
-        <button type="button" className="share-button" onClick={shareLounge}>
-          <UiIcon name="share" /> INVITE A FRIEND
-        </button>
+        <div className="hero-actions">
+          <button type="button" className="practice-button" onClick={onPractice} disabled={busy || Boolean(outgoing)}>
+            <UiIcon name="zap" /> PRACTICE SOLO
+          </button>
+          <button type="button" className="share-button" onClick={shareLounge}>
+            <UiIcon name="share" /> INVITE A FRIEND
+          </button>
+        </div>
       </section>
 
       <div className="lobby-grid">
@@ -531,11 +550,11 @@ function Lobby({
             <ol>
               {mode === "sort" ? <><li>
                 <span>1</span>
-                <p><b>TAP</b> a bolt to lift its top nut.</p>
+                <p><b>TAP</b> a bolt to lift its matching top group.</p>
               </li>
               <li>
                 <span>2</span>
-                <p><b>PLACE</b> it on an empty bolt or the same color.</p>
+                <p><b>PLACE</b> the full group where every nut fits.</p>
               </li>
               <li>
                 <span>3</span>
@@ -595,6 +614,7 @@ function BoltSortBoardView({
     >
       {board.map((bolt, boltIndex) => {
         const topNut = bolt.at(-1);
+        const groupSize = topBoltGroupSize(bolt);
         const locked = isLockedBolt(bolt);
         const legalTarget =
           selectedBolt !== null &&
@@ -618,7 +638,7 @@ function BoltSortBoardView({
                   <span
                     key={`${nut}-${index}`}
                     className={`game-nut nut-${color}${
-                      selectedBolt === boltIndex && index === bolt.length - 1
+                      selectedBolt === boltIndex && index >= bolt.length - groupSize
                         ? " lifted"
                         : ""
                     }`}
@@ -634,7 +654,11 @@ function BoltSortBoardView({
         );
         if (mini) {
           return (
-            <span key={boltIndex} className={classes}>
+            <span
+              key={boltIndex}
+              className={classes}
+              style={{ "--pole-height": `${32 + (boltIndex % 3) * 3}px` } as React.CSSProperties}
+            >
               {contents}
             </span>
           );
@@ -644,12 +668,16 @@ function BoltSortBoardView({
             key={boltIndex}
             type="button"
             className={classes}
+            style={{
+              "--pole-height": `${98 + (boltIndex % 4) * 6}px`,
+              "--compact-pole-height": `${58 + (boltIndex % 4) * 4}px`,
+            } as React.CSSProperties}
             onClick={() => onBolt?.(boltIndex)}
             disabled={!interactive}
             aria-pressed={selectedBolt === boltIndex}
             aria-label={`Bolt ${boltIndex + 1} of ${board.length}. ${stackSummary} ${
               topNut
-                ? `Top nut ${topNut}, marker ${nutIndex(topNut) + 1}.`
+                ? `Top group ${groupSize} ${topNut} nut${groupSize === 1 ? "" : "s"}, marker ${nutIndex(topNut) + 1}.`
                 : ""
             } ${bolt.length} of ${BOLT_CAPACITY} spaces filled.${
               locked ? " Sorted and locked." : ""
@@ -697,7 +725,7 @@ function RaceResultDialog({
         <span className="result-icon">
           {won ? <UiIcon name="trophy" /> : <UiIcon name="swords" />}
         </span>
-        <span className="result-kicker">{won ? (match.mode === "sort" ? "SORT SECURED" : "TOWER SECURED") : "RACE COMPLETE"}</span>
+        <span className="result-kicker">{match.practice ? "PRACTICE COMPLETE" : won ? (match.mode === "sort" ? "SORT SECURED" : "TOWER SECURED") : "RACE COMPLETE"}</span>
         <h2 id="result-title">
           {won ? (match.mode === "sort" ? "YOU SORTED IT!" : "YOU BUILT IT!") : `${match.opponent.name} GOT THERE FIRST`}
         </h2>
@@ -706,7 +734,7 @@ function RaceResultDialog({
             ? `A ${formatTime(elapsed)} finish in ${match.myMoves} moves.`
             : `You made ${match.myMoves} moves and reached ${myProgress}%.`}
         </p>
-        <div className="result-score">
+        {match.practice ? <div className="practice-result-summary"><b>{formatTime(elapsed)}</b><span>{match.myMoves} MOVES</span></div> : <div className="result-score">
           <div className={won ? "winner" : ""}>
             <Avatar player={snapshot.player} small />
             <span>YOU</span>
@@ -720,7 +748,7 @@ function RaceResultDialog({
             <b>{match.opponentMoves}</b>
             <small>MOVES</small>
           </div>
-        </div>
+        </div>}
         {match.status === "finished" ? (
           <>
             <button
@@ -735,7 +763,7 @@ function RaceResultDialog({
                 ? match.opponentRematch
                   ? "STARTING…"
                   : "WAITING FOR RIVAL…"
-                : "RACE AGAIN"}
+                : match.practice ? "TRY ANOTHER" : "RACE AGAIN"}
             </button>
             <button type="button" className="secondary-result" onClick={onLeave} disabled={busy}>
               BACK TO LOUNGE
@@ -786,16 +814,16 @@ function HanoiBoardView({
 }
 
 function HanoiRace({
-  snapshot, now, selectedPeg, setSelectedPeg, busy, onMove, onLeave, onRematch, onToast,
+  snapshot, now, selectedPeg, setSelectedPeg, busy, onMove, onReset, onLeave, onRematch, onToast,
 }: {
-  snapshot: Snapshot; now: number; selectedPeg: number | null; setSelectedPeg: (value: number | null) => void; busy: boolean; onMove: (from: number, to: number) => void; onLeave: () => void; onRematch: () => void; onToast: (message: string) => void;
+  snapshot: Snapshot; now: number; selectedPeg: number | null; setSelectedPeg: (value: number | null) => void; busy: boolean; onMove: (from: number, to: number) => void; onReset: () => void; onLeave: () => void; onRematch: () => void; onToast: (message: string) => void;
 }) {
   const match = snapshot.match as HanoiMatch;
   const [invalidPeg, setInvalidPeg] = useState<number | null>(null);
   const countdown = Math.max(0, Math.min(3, Math.ceil((match.startsAt - now) / 1_000)));
   const ended = match.status === "finished" || match.status === "abandoned";
   const playable = !ended && now >= match.startsAt && !busy;
-  const elapsed = (match.finishedAt ?? now) - match.startsAt;
+  const elapsed = raceElapsed(match.startsAt, now, match.finishedAt, match.optimisticFinishedAt);
   const myProgress = hanoiProgress(match.myBoard, match.diskCount);
   const opponentProgress = hanoiProgress(match.opponentBoard, match.diskCount);
 
@@ -813,12 +841,12 @@ function HanoiRace({
     const from = selectedPeg; setSelectedPeg(null); onMove(from, peg);
   };
 
-  return <main className="race-shell hanoi-race">
+  return <main className={`race-shell hanoi-race${match.practice ? " practice-race" : ""}`}>
     <header className="race-topbar"><button type="button" className="icon-button" onClick={onLeave} aria-label="Leave race"><UiIcon name="back" /></button><Brand /><div className="race-kind"><span>{match.diskCount} RINGS</span><b>PAR {match.par} MOVES</b></div></header>
-    <section className="opponent-strip"><div className="opponent-identity"><Avatar player={match.opponent} small /><div><span>YOUR RIVAL</span><strong>{match.opponent.name}</strong></div><i className={match.opponent.online ? "online" : "offline"}>{match.opponent.online ? "LIVE" : "RECONNECTING"}</i></div><div className="opponent-mini" role="img" aria-label={`Opponent tower, ${opponentProgress} percent complete`}><HanoiBoardView board={match.opponentBoard} diskCount={match.diskCount} selectedPeg={null} interactive={false} mini /></div><div className="opponent-stats"><strong>{opponentProgress}%</strong><span>{match.opponentMoves} MOVES</span></div></section>
+    {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>SOLO PRACTICE</span><b>LEARN THE PATTERN · NO STATS COUNTED</b></div></section> : <section className="opponent-strip"><div className="opponent-identity"><Avatar player={match.opponent} small /><div><span>YOUR RIVAL</span><strong>{match.opponent.name}</strong></div><i className={match.opponent.online ? "online" : "offline"}>{match.opponent.online ? "LIVE" : "RECONNECTING"}</i></div><div className="opponent-mini" role="img" aria-label={`Opponent tower, ${opponentProgress} percent complete`}><HanoiBoardView board={match.opponentBoard} diskCount={match.diskCount} selectedPeg={null} interactive={false} mini /></div><div className="opponent-stats"><strong>{opponentProgress}%</strong><span>{match.opponentMoves} MOVES</span></div></section>}
     <section className="race-stage"><div className="race-stats"><div><span>TIME</span><strong>{formatTime(elapsed)}</strong></div><div className="race-status-center"><span className="progress-track" role="progressbar" aria-label="Tower complete" aria-valuemin={0} aria-valuemax={100} aria-valuenow={myProgress}><i style={{ width: `${myProgress}%` }} /></span><b>{match.myBoard[2].length} / {match.diskCount} RINGS ON GOAL</b></div><div><span>MOVES</span><strong>{match.myMoves}</strong></div></div>
       <div className="board-wrap"><span className="you-badge">YOUR BOARD</span><HanoiBoardView board={match.myBoard} diskCount={match.diskCount} selectedPeg={selectedPeg} invalidPeg={invalidPeg} interactive={playable} onPeg={handlePeg} /></div>
-      <div className="move-prompt" aria-live="polite"><span className={`prompt-icon${selectedPeg !== null ? " active" : ""}`}>{selectedPeg !== null ? <UiIcon name="check" /> : <span>1</span>}</span><div><b>{selectedPeg !== null ? "RING LIFTED" : "YOUR MOVE"}</b><span>{selectedPeg !== null ? "Tap an empty tower or a larger ring" : "Tap a tower to lift its top ring"}</span></div>{selectedPeg !== null ? <button type="button" onClick={() => setSelectedPeg(null)}>CANCEL</button> : null}</div>
+      <div className="move-prompt" aria-live="polite"><span className={`prompt-icon${selectedPeg !== null ? " active" : ""}`}>{selectedPeg !== null ? <UiIcon name="check" /> : <span>1</span>}</span><div><b>{selectedPeg !== null ? "RING LIFTED" : "YOUR MOVE"}</b><span>{selectedPeg !== null ? "Tap an empty tower or a larger ring" : "Tap a tower to lift its top ring"}</span></div><div className="prompt-actions">{selectedPeg !== null ? <button type="button" onClick={() => setSelectedPeg(null)}>CANCEL</button> : null}<button type="button" onClick={() => { setSelectedPeg(null); onReset(); }} disabled={busy}>RESET</button></div></div>
     </section>
     {countdown > 0 && !ended ? <div className="countdown-overlay" role="status" aria-live="assertive"><div className="countdown-card"><span>GET READY</span><strong key={countdown}>{countdown}</strong><p>Same tower. First perfect stack wins.</p></div></div> : null}
     {ended ? <RaceResultDialog snapshot={snapshot} match={match} elapsed={elapsed} myProgress={myProgress} busy={busy} onRematch={onRematch} onLeave={onLeave} /> : null}
@@ -857,7 +885,7 @@ function SortRace({
   );
   const ended = match.status === "finished" || match.status === "abandoned";
   const playable = !ended && now >= match.startsAt && !busy;
-  const elapsed = (match.finishedAt ?? now) - match.startsAt;
+  const elapsed = raceElapsed(match.startsAt, now, match.finishedAt, match.optimisticFinishedAt);
   const myProgressInfo = getBoltSortProgress(match.myBoard, match.colorCount);
   const myProgress = myProgressInfo.percent;
   const opponentProgress = boltSortProgress(match.opponentBoard, match.colorCount);
@@ -865,6 +893,7 @@ function SortRace({
     !ended &&
     !isBoltSortSolved(match.myBoard, match.colorCount) &&
     listLegalBoltMoves(match.myBoard, match.colorCount).length === 0;
+  const selectedGroupSize = selectedBolt === null ? 0 : topBoltGroupSize(match.myBoard[selectedBolt]);
 
   useEffect(() => {
     return () => {
@@ -916,7 +945,7 @@ function SortRace({
   };
 
   return (
-    <main className="race-shell">
+    <main className={`race-shell${match.practice ? " practice-race" : ""}`}>
       <header className="race-topbar">
         <button type="button" className="icon-button" onClick={onLeave} aria-label="Leave race">
           <UiIcon name="back" />
@@ -928,7 +957,7 @@ function SortRace({
         </div>
       </header>
 
-      <section className="opponent-strip">
+      {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>SOLO PRACTICE</span><b>TEST THE SCRAMBLE · RESET ANYTIME</b></div></section> : <section className="opponent-strip">
         <div className="opponent-identity">
           <Avatar player={match.opponent} small />
           <div>
@@ -956,7 +985,7 @@ function SortRace({
           <strong>{opponentProgress}%</strong>
           <span>{match.opponentMoves} MOVES</span>
         </div>
-      </section>
+      </section>}
 
       <section className="race-stage">
         <div className="race-stats">
@@ -1002,29 +1031,19 @@ function SortRace({
             {deadlocked ? "!" : selectedBolt !== null ? <UiIcon name="check" /> : <span>1</span>}
           </span>
           <div>
-            <b>{deadlocked ? "NO MOVES LEFT" : selectedBolt !== null ? "NUT LIFTED" : "YOUR MOVE"}</b>
+            <b>{deadlocked ? "NO MOVES LEFT" : selectedBolt !== null ? `${selectedGroupSize} NUT${selectedGroupSize === 1 ? "" : "S"} LIFTED` : "YOUR MOVE"}</b>
             <span>
               {deadlocked
                 ? "Reset to the shared starting scramble"
                 : selectedBolt !== null
-                ? "Tap an empty bolt or the same color"
-                : "Tap any stack to lift its top nut"}
+                ? "Place the full matching group where it fits"
+                : "Tap any stack to lift its matching top group"}
             </span>
           </div>
-          {deadlocked ? (
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedBolt(null);
-                onReset();
-              }}
-              disabled={busy}
-            >
-              RESET
-            </button>
-          ) : selectedBolt !== null ? (
-            <button type="button" onClick={() => setSelectedBolt(null)}>CANCEL</button>
-          ) : null}
+          <div className="prompt-actions">
+            {!deadlocked && selectedBolt !== null ? <button type="button" onClick={() => setSelectedBolt(null)}>CANCEL</button> : null}
+            <button type="button" onClick={() => { setSelectedBolt(null); onReset(); }} disabled={busy}>RESET</button>
+          </div>
         </div>
       </section>
 
@@ -1073,6 +1092,7 @@ function Race(props: {
       setSelectedPeg={props.setSelectedBolt}
       busy={props.busy}
       onMove={props.onMove}
+      onReset={props.onReset}
       onLeave={props.onLeave}
       onRematch={props.onRematch}
       onToast={props.onToast}
@@ -1221,6 +1241,89 @@ function ConfirmLeaveDialog({
   );
 }
 
+function clonePracticeBoard(board: BoltSortBoard | HanoiBoard): BoltSortBoard | HanoiBoard {
+  return board.map((stack) => [...stack]) as BoltSortBoard | HanoiBoard;
+}
+
+function createPracticeSession(
+  player: Player,
+  mode: GameMode,
+  tier: BoltSortTierId | HanoiTierId,
+): PracticeSession {
+  const now = Date.now();
+  const opponent = {
+    id: "practice",
+    name: "Solo Practice",
+    hue: 74,
+    wins: 0,
+    races: 0,
+    online: true,
+  };
+  let match: Match;
+  let initialBoard: BoltSortBoard | HanoiBoard;
+  if (mode === "sort") {
+    const puzzle = createBoltSortPuzzle(
+      tier as BoltSortTierId,
+      `practice:${crypto.randomUUID()}`,
+    );
+    initialBoard = puzzle.board;
+    match = {
+      id: `practice:${crypto.randomUUID()}`,
+      mode: "sort",
+      tier: tier as BoltSortTierId,
+      status: "countdown",
+      colorCount: puzzle.colorCount,
+      diskCount: null,
+      startsAt: now + 1_500,
+      finishedAt: null,
+      winnerId: null,
+      myBoard: clonePracticeBoard(puzzle.board) as BoltSortBoard,
+      opponentBoard: clonePracticeBoard(puzzle.board) as BoltSortBoard,
+      myMoves: 0,
+      opponentMoves: 0,
+      myRematch: false,
+      opponentRematch: false,
+      opponent,
+      practice: true,
+    };
+  } else {
+    const level = HANOI_LEVELS[tier as HanoiTierId];
+    const board = createHanoiBoard(level.diskCount);
+    initialBoard = board;
+    match = {
+      id: `practice:${crypto.randomUUID()}`,
+      mode: "hanoi",
+      tier: tier as HanoiTierId,
+      status: "countdown",
+      colorCount: null,
+      diskCount: level.diskCount,
+      par: level.par,
+      startsAt: now + 1_500,
+      finishedAt: null,
+      winnerId: null,
+      myBoard: clonePracticeBoard(board) as HanoiBoard,
+      opponentBoard: clonePracticeBoard(board) as HanoiBoard,
+      myMoves: 0,
+      opponentMoves: 0,
+      myRematch: false,
+      opponentRematch: false,
+      opponent,
+      practice: true,
+    };
+  }
+  return {
+    initialBoard: clonePracticeBoard(initialBoard),
+    snapshot: {
+      serverNow: now,
+      player,
+      online: [],
+      incoming: [],
+      outgoing: [],
+      match,
+    },
+  };
+}
+
 export function GameApp() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -1233,6 +1336,8 @@ export function GameApp() {
   const [toast, setToast] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [confirmingLeave, setConfirmingLeave] = useState(false);
+  const [practice, setPractice] = useState<PracticeSession | null>(null);
+  const [practiceNow, setPracticeNow] = useState(0);
   const [clockNow, setClockNow] = useState(0);
   const snapshotRef = useRef<Snapshot | null>(null);
   const busyRef = useRef(false);
@@ -1251,6 +1356,7 @@ export function GameApp() {
       setMoveReconciling(false);
     }
     if (next.incoming.length) setEditingName(false);
+    if (next.match) setPractice(null);
     snapshotRef.current = next;
     clockOffsetRef.current = next.serverNow - Date.now();
     setClockNow(next.serverNow);
@@ -1329,6 +1435,7 @@ export function GameApp() {
                 ...next.match,
                 myBoard: current.match.myBoard,
                 myMoves: current.match.myMoves,
+                optimisticFinishedAt: current.match.optimisticFinishedAt,
               } as Match,
             };
           }
@@ -1373,6 +1480,8 @@ export function GameApp() {
   const hasSnapshot = Boolean(snapshot);
   const matchId = snapshot?.match?.id ?? null;
   const matchStatus = snapshot?.match?.status ?? null;
+  const practiceMatchId = practice?.snapshot.match?.id ?? null;
+  const practiceMatchStatus = practice?.snapshot.match?.status ?? null;
 
   useEffect(() => {
     if (!hasSnapshot) return;
@@ -1419,6 +1528,12 @@ export function GameApp() {
   }, [matchId, matchStatus]);
 
   useEffect(() => {
+    if (!practiceMatchId || practiceMatchStatus === "finished") return;
+    const interval = setInterval(() => setPracticeNow(Date.now()), 100);
+    return () => clearInterval(interval);
+  }, [practiceMatchId, practiceMatchStatus]);
+
+  useEffect(() => {
     if (matchId) window.scrollTo({ top: 0, behavior: "instant" });
   }, [matchId]);
 
@@ -1455,11 +1570,31 @@ export function GameApp() {
     if (match.mode === "sort") {
       const local = moveBoltSortNut(match.myBoard, from, to, match.colorCount);
       if (!local.ok) return;
-      applySnapshot({ ...current, match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 } });
+      applySnapshot({
+        ...current,
+        match: {
+          ...match,
+          myBoard: local.board,
+          myMoves: match.myMoves + 1,
+          optimisticFinishedAt: isBoltSortSolved(local.board, match.colorCount)
+            ? Date.now() + clockOffsetRef.current
+            : match.optimisticFinishedAt,
+        },
+      });
     } else {
       const local = moveHanoiDisk(match.myBoard, from, to, match.diskCount);
       if (!local.ok) return;
-      applySnapshot({ ...current, match: { ...match, myBoard: local.board, myMoves: match.myMoves + 1 } });
+      applySnapshot({
+        ...current,
+        match: {
+          ...match,
+          myBoard: local.board,
+          myMoves: match.myMoves + 1,
+          optimisticFinishedAt: isHanoiSolved(local.board, match.diskCount)
+            ? Date.now() + clockOffsetRef.current
+            : match.optimisticFinishedAt,
+        },
+      });
     }
     moveQueueRef.current.push({
       matchId: match.id,
@@ -1502,9 +1637,110 @@ export function GameApp() {
   const activeRace = snapshot.match && !["finished", "abandoned"].includes(snapshot.match.status);
   const difficulty = mode === "sort" ? sortDifficulty : hanoiDifficulty;
 
+  const beginPractice = (
+    practiceMode: GameMode = mode,
+    practiceTier: BoltSortTierId | HanoiTierId = difficulty,
+  ) => {
+    setSelectedBolt(null);
+    const session = createPracticeSession(snapshot.player, practiceMode, practiceTier);
+    setPracticeNow(session.snapshot.serverNow);
+    setPractice(session);
+  };
+
+  const movePractice = (from: number, to: number) => {
+    setPractice((current) => {
+      const match = current?.snapshot.match;
+      if (!current || !match || match.status === "finished") return current;
+      const now = Date.now();
+      if (match.mode === "sort") {
+        const result = moveBoltSortNut(match.myBoard, from, to, match.colorCount);
+        if (!result.ok) return current;
+        const solved = isBoltSortSolved(result.board, match.colorCount);
+        return {
+          ...current,
+          snapshot: {
+            ...current.snapshot,
+            serverNow: now,
+            match: {
+              ...match,
+              myBoard: result.board,
+              myMoves: match.myMoves + 1,
+              status: solved ? "finished" : "playing",
+              finishedAt: solved ? now : null,
+              winnerId: solved ? current.snapshot.player.id : null,
+            },
+          },
+        };
+      }
+      const result = moveHanoiDisk(match.myBoard, from, to, match.diskCount);
+      if (!result.ok) return current;
+      const solved = isHanoiSolved(result.board, match.diskCount);
+      return {
+        ...current,
+        snapshot: {
+          ...current.snapshot,
+          serverNow: now,
+          match: {
+            ...match,
+            myBoard: result.board,
+            myMoves: match.myMoves + 1,
+            status: solved ? "finished" : "playing",
+            finishedAt: solved ? now : null,
+            winnerId: solved ? current.snapshot.player.id : null,
+          },
+        },
+      };
+    });
+  };
+
+  const resetPractice = () => {
+    setSelectedBolt(null);
+    setPractice((current) => {
+      const match = current?.snapshot.match;
+      if (!current || !match) return current;
+      const now = Date.now();
+      return {
+        ...current,
+        snapshot: {
+          ...current.snapshot,
+          serverNow: now,
+          match: {
+            ...match,
+            status: "playing",
+            startsAt: now,
+            finishedAt: null,
+            winnerId: null,
+            myBoard: clonePracticeBoard(current.initialBoard) as never,
+            myMoves: 0,
+          } as Match,
+        },
+      };
+    });
+    setPracticeNow(Date.now());
+  };
+
   return (
     <>
-      {snapshot.match ? (
+      {practice ? (
+        <Race
+          snapshot={practice.snapshot}
+          now={practiceNow}
+          selectedBolt={selectedBolt}
+          setSelectedBolt={setSelectedBolt}
+          busy={false}
+          onMove={movePractice}
+          onReset={resetPractice}
+          onLeave={() => {
+            setSelectedBolt(null);
+            setPractice(null);
+          }}
+          onRematch={() => {
+            const match = practice.snapshot.match!;
+            beginPractice(match.mode, match.tier);
+          }}
+          onToast={showToast}
+        />
+      ) : snapshot.match ? (
         <Race
           snapshot={snapshot}
           now={clockNow}
@@ -1537,6 +1773,7 @@ export function GameApp() {
             void sendAction("challenge", { playerId, mode, tier: difficulty })
           }
           onCancel={(inviteId) => void sendAction("cancel-invite", { inviteId })}
+          onPractice={() => beginPractice()}
           onEditName={() => setEditingName(true)}
           onToast={showToast}
         />
@@ -1561,7 +1798,7 @@ export function GameApp() {
         />
       ) : null}
 
-      {editingName && !snapshot.incoming[0] ? (
+      {!practice && editingName && !snapshot.incoming[0] ? (
         <NameDialog
           player={snapshot.player}
           busy={busy}
@@ -1573,7 +1810,7 @@ export function GameApp() {
         />
       ) : null}
 
-      {confirmingLeave && snapshot.match ? (
+      {!practice && confirmingLeave && snapshot.match ? (
         <ConfirmLeaveDialog
           opponentName={snapshot.match.opponent.name}
           onCancel={() => setConfirmingLeave(false)}

@@ -19,6 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const forwardedProtocol = requestHeaders.get("x-forwarded-proto");
   const protocol = forwardedProtocol ?? (host?.startsWith("localhost") ? "http" : "https");
   const origin = host ? `${protocol}://${host}` : "http://localhost:3000";
+  const socialImage = new URL("/og.png", origin).toString();
 
   return {
     metadataBase: new URL(origin),
@@ -30,11 +31,13 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "Peg Rush — Race the Puzzle",
       description: "Pick a rival. Choose a puzzle. No account needed.",
       type: "website",
+      images: [{ url: socialImage, width: 1536, height: 1024, alt: "Peg Rush Nut Sort versus Tower Race" }],
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: "Peg Rush — Race the Puzzle",
       description: "Pick a rival. Choose a puzzle. No account needed.",
+      images: [socialImage],
     },
   };
 }

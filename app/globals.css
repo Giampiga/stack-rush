@@ -362,7 +362,15 @@ input:focus-visible {
   line-height: 1.5;
 }
 
-.share-button {
+.hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.share-button,
+.practice-button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -380,6 +388,9 @@ input:focus-visible {
 }
 
 .share-button:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 var(--orange); }
+.practice-button { justify-content: center; background: var(--lime); color: var(--ink); box-shadow: 5px 5px 0 var(--ink); }
+.practice-button:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 var(--ink); }
+.practice-button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
 .lobby-grid {
   display: grid;
@@ -879,6 +890,23 @@ input:focus-visible {
   box-shadow: 5px 5px 0 var(--purple);
 }
 
+.practice-strip {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  border: 2px solid var(--ink);
+  border-radius: 17px;
+  background: var(--lime);
+  padding: var(--space-3) var(--space-4);
+  box-shadow: 5px 5px 0 var(--ink);
+}
+.practice-strip > .ui-icon { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border: 2px solid var(--ink); border-radius: 10px; background: white; font-size: 20px; }
+.practice-strip > div { display: flex; flex-direction: column; gap: 2px; }
+.practice-strip span { font-size: 11px; font-weight: 950; letter-spacing: .1em; }
+.practice-strip b { font-size: 8px; letter-spacing: .08em; }
+
 .opponent-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .opponent-identity > div { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
 .opponent-identity div span { color: #adb9b5; font-size: 8px; font-weight: 850; letter-spacing: .12em; }
@@ -1005,7 +1033,7 @@ input:focus-visible {
   left: 50%;
   bottom: 12px;
   width: 8px;
-  height: 105px;
+  height: var(--pole-height, 105px);
   transform: translateX(-50%);
   border: 2px solid var(--ink);
   border-radius: 7px 7px 2px 2px;
@@ -1143,6 +1171,8 @@ input:focus-visible {
 .move-prompt b { font-size: 9px; letter-spacing: .08em; }
 .move-prompt div span { color: #697471; font-size: 10px; }
 .move-prompt button { min-width: 44px; min-height: 44px; border: 0; background: transparent; padding: 0 8px; font-size: 9px; font-weight: 900; text-decoration: underline; cursor: pointer; }
+.prompt-actions { display: flex; align-items: center; gap: var(--space-1); }
+.prompt-actions button:last-child { border: 1.5px solid var(--ink); border-radius: 9px; background: white; text-decoration: none; }
 
 .countdown-card { padding: 34px; background: var(--lime); box-shadow: 10px 10px 0 var(--orange); }
 .countdown-card > span { font-size: 12px; font-weight: 950; letter-spacing: .14em; }
@@ -1170,6 +1200,9 @@ input:focus-visible {
 .result-score > div small { font-size: 7px; font-weight: 800; color: var(--ink-soft); }
 .result-score > span { font-size: 8px; font-weight: 950; color: var(--ink-soft); }
 .result-score > div.winner { color: var(--orange-dark); }
+.practice-result-summary { display: flex; align-items: baseline; justify-content: center; gap: var(--space-3); margin: 0 0 var(--space-5); border: 1.5px solid var(--line); border-radius: 15px; background: white; padding: var(--space-4); }
+.practice-result-summary b { font-size: 32px; letter-spacing: -.06em; }
+.practice-result-summary span { color: var(--ink-soft); font-size: 9px; font-weight: 900; letter-spacing: .1em; }
 .primary-result, .secondary-result { display: flex; width: 100%; min-height: 50px; align-items: center; justify-content: center; gap: 9px; border: 2px solid var(--ink); border-radius: 12px; font-size: 11px; font-weight: 950; letter-spacing: .04em; cursor: pointer; }
 .primary-result { background: var(--orange); color: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
 .primary-result:disabled { background: #9a9f9c; box-shadow: none; }
@@ -1204,7 +1237,8 @@ input:focus-visible {
   .lobby-hero { display: block; padding: var(--space-7) 2px var(--space-6); }
   .lobby-hero h1 { font-size: clamp(42px, 13.8vw, 64px); line-height: .92; }
   .lobby-hero p { margin-top: var(--space-4); font-size: 14px; }
-  .share-button { width: 100%; justify-content: center; margin-top: var(--space-5); }
+  .hero-actions { margin-top: var(--space-5); }
+  .share-button, .practice-button { width: 100%; justify-content: center; }
   .lounge-panel { min-height: 0; padding: var(--space-5) var(--space-4); border-radius: 18px; }
   .section-heading { align-items: start; }
   .section-heading h2, .rivals-heading h2 { font-size: 20px; }
@@ -1254,6 +1288,7 @@ input:focus-visible {
   .race-kind span { font-size: 9px; }
   .race-kind b { font-size: 7px; }
   .opponent-strip { grid-template-columns: 1fr 116px auto; gap: var(--space-2); margin-top: var(--space-2); border-radius: 14px; padding: var(--space-2); box-shadow: 4px 4px 0 var(--purple); }
+  .practice-strip { min-height: 54px; margin-top: var(--space-2); border-radius: 14px; padding: var(--space-2) var(--space-3); box-shadow: 4px 4px 0 var(--ink); }
   .opponent-identity { gap: 7px; }
   .opponent-identity strong { max-width: 105px; font-size: 11px; }
   .opponent-identity div span { font-size: 6px; }
@@ -1314,7 +1349,7 @@ input:focus-visible {
   }
   .game-nut::before { top: 2px; height: 2px; }
   .game-nut i { width: 12px; height: 12px; border-width: 1px; font-size: 6px; }
-  .bolt-rod { bottom: 9px; width: 7px; height: 64px; }
+  .bolt-rod { bottom: 9px; width: 7px; height: var(--compact-pole-height, 64px); }
   .nut-stack { bottom: 10px; }
   .bolt-base { bottom: 1px; height: 9px; }
   .bolt-cap { top: -2px; width: 14px; height: 14px; font-size: 7px; }

@@ -27,13 +27,17 @@ test("server-renders the Peg Rush product shell and metadata", async () => {
 });
 
 test("starter preview assets and dependencies are fully removed", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+  const [page, layout, gameApp, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/GameApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /<GameApp \/>/);
   assert.match(layout, /Peg Rush/);
+  assert.match(gameApp, /PRACTICE SOLO/);
+  assert.match(gameApp, /matching top group/);
+  assert.match(gameApp, />RESET</);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview", projectRoot)));
 });
