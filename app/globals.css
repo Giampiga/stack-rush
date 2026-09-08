@@ -339,18 +339,17 @@ input:focus-visible {
 
 .lobby-hero h1 {
   margin: 0;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: clamp(44px, 7.2vw, 82px);
-  font-weight: 950;
-  line-height: 0.88;
-  letter-spacing: -0.075em;
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
 }
 
 .lobby-hero h1 em {
   position: relative;
   color: var(--orange);
   font-style: normal;
-  text-shadow: 2px 2px 0 var(--ink);
-  -webkit-text-stroke: 1.5px var(--ink);
 }
 
 .lobby-hero p {
