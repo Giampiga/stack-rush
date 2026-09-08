@@ -21,12 +21,15 @@ import {
   HANOI_LEVELS,
   createHanoiBoard,
   hanoiProgress,
+  hanoiHint,
   isHanoiSolved,
   moveHanoiDisk,
   type HanoiBoard,
   type HanoiTierId,
 } from "@/lib/hanoi";
-import { raceElapsed } from "@/lib/race-timer";
+import { raceElapsed, formatRaceTime as formatTime } from "@/lib/race-timer";
+import { dailyChallenge, parsePracticeSave, parsePracticeRecords, sortPracticeHint, PRACTICE_SAVE_KEY, PRACTICE_RECORDS_KEY, type PracticeConfig, type PracticeRecord, type SavedPractice } from "@/lib/practice";
+import { DailyCard, PersonalBests, SessionStart } from "./PracticeHub";
 
 type GameMode = "sort" | "hanoi";
 
@@ -62,6 +65,8 @@ type MatchBase = {
   opponentRematch: boolean;
   opponent: Player & { online: boolean };
   practice?: boolean;
+  dailyDate?: string;
+  assisted?: boolean;
   optimisticFinishedAt?: number | null;
 };
 
@@ -89,6 +94,8 @@ type Match = SortMatch | HanoiMatch;
 type PracticeSession = {
   snapshot: Snapshot;
   initialBoard: BoltSortBoard | HanoiBoard;
+  config: PracticeConfig;
+  history: Array<BoltSortBoard | HanoiBoard>;
 };
 
 type Snapshot = {
@@ -216,6 +223,7 @@ async function gameRequest(
 ): Promise<Snapshot> {
   const response = await fetch("/api/game", {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
@@ -258,25 +266,40 @@ function Brand() {
   );
 }
 
-function formatTime(milliseconds: number) {
-  const safe = Math.max(0, milliseconds);
-  const minutes = Math.floor(safe / 60_000);
-  const seconds = ((safe % 60_000) / 1_000).toFixed(1);
-  return minutes ? `${minutes}:${seconds.padStart(4, "0")}` : `${seconds}s`;
-}
-
 function recordLabel(player: Player) {
   if (!player.races) return "New racer";
   return `${player.wins} win${player.wins === 1 ? "" : "s"} · ${player.races} races`;
 }
 
+
+function radioKeys(event: React.KeyboardEvent<HTMLDivElement>) {
+  const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+  const index = buttons.indexOf(event.target as HTMLButtonElement);
+  if (index < 0) return;
+  const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+    : ["ArrowRight", "ArrowDown"].includes(event.key) ? (index + 1) % buttons.length
+    : ["ArrowLeft", "ArrowUp"].includes(event.key) ? (index + buttons.length - 1) % buttons.length : -1;
+  if (next < 0) return;
+  event.preventDefault(); buttons[next].focus(); buttons[next].click();
+}
+
+function boardKeys(event: React.KeyboardEvent<HTMLDivElement>, columns: number) {
+  const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+  const index = buttons.indexOf(event.target as HTMLButtonElement);
+  if (index < 0) return;
+  const offset = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1
+    : event.key === "ArrowDown" ? columns : event.key === "ArrowUp" ? -columns : 0;
+  if (!offset) return;
+  event.preventDefault(); buttons[(index + offset + buttons.length) % buttons.length]?.focus();
+}
+
 function ModePicker({ value, onChange }: { value: GameMode; onChange: (value: GameMode) => void }) {
   return (
-    <div className="mode-picker" role="radiogroup" aria-label="Puzzle mode">
-      <button type="button" role="radio" aria-checked={value === "sort"} className={value === "sort" ? "active" : ""} onClick={() => onChange("sort")}>
+    <div className="mode-picker" role="radiogroup" tabIndex={-1} aria-label="Puzzle mode" onKeyDown={radioKeys}>
+      <button type="button" role="radio" tabIndex={value === "sort" ? 0 : -1} aria-checked={value === "sort"} className={value === "sort" ? "active" : ""} onClick={() => onChange("sort")}>
         <span aria-hidden="true">⬢</span><b>NUTS &amp; BOLTS</b><small>COLOR STACKS</small>
       </button>
-      <button type="button" role="radio" aria-checked={value === "hanoi"} className={value === "hanoi" ? "active" : ""} onClick={() => onChange("hanoi")}>
+      <button type="button" role="radio" tabIndex={value === "hanoi" ? 0 : -1} aria-checked={value === "hanoi"} className={value === "hanoi" ? "active" : ""} onClick={() => onChange("hanoi")}>
         <span aria-hidden="true">≋</span><b>TOWER RACE</b><small>TOWER OF HANOI</small>
       </button>
     </div>
@@ -296,12 +319,13 @@ function DifficultyPicker({
     ? Object.values(BOLT_SORT_TIERS).map((level) => ({ id: level.id, label: level.label, count: level.colorCount, detail: `${level.colorCount + 2} BOLTS` }))
     : (Object.entries(HANOI_LEVELS) as Array<[HanoiTierId, (typeof HANOI_LEVELS)[HanoiTierId]]>).map(([id, level]) => ({ id, label: level.label, count: level.diskCount, detail: `PAR ${level.par}` }));
   return (
-    <div className="difficulty" role="radiogroup" aria-label="Race difficulty">
+    <div className="difficulty" role="radiogroup" tabIndex={-1} aria-label="Race difficulty" onKeyDown={radioKeys}>
       {levels.map((level) => (
         <button
           key={level.id}
           type="button"
           role="radio"
+          tabIndex={value === level.id ? 0 : -1}
           aria-checked={value === level.id}
           className={value === level.id ? "active" : ""}
           onClick={() => onChange(level.id)}
@@ -365,7 +389,9 @@ function Lobby({
   onPractice,
   onEditName,
   onToast,
+  savedPractice, records, daily, onDaily, onResume, onHelp, connection, now,
 }: {
+  savedPractice: SavedPractice | null; records: PracticeRecord[]; daily: PracticeConfig; onDaily: () => void; onResume: () => void; onHelp: () => void; connection: boolean; now: number;
   snapshot: Snapshot;
   mode: GameMode;
   setMode: (value: GameMode) => void;
@@ -406,8 +432,8 @@ function Lobby({
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
-          <span className="live-pill">
-            <UiIcon name="wifi" /> LIVE
+          <span className={`live-pill${connection ? "" : " reconnecting"}`}>
+            <UiIcon name="wifi" /> {connection ? "LIVE" : "RECONNECTING"}
           </span>
           <button
             type="button"
@@ -428,18 +454,14 @@ function Lobby({
             <span className="pulse-dot" /> {snapshot.online.length + 1} PLAYING NOW
           </span>
           <h1>
-            PICK A RIVAL.
-            <br />
-            <em>RACE THE PUZZLE.</em>
+            YOUR NEXT<br /><em>BRIGHT MOVE.</em>
           </h1>
           <p>
-            Same puzzle. Same countdown. First to finish takes the win.
+            Find your rhythm solo. Or challenge a friend to a puzzle race.
           </p>
         </div>
         <div className="hero-actions">
-          <button type="button" className="practice-button" onClick={onPractice} disabled={busy || Boolean(outgoing)}>
-            <UiIcon name="zap" /> PRACTICE SOLO
-          </button>
+          <span className="hero-note">TWO PUZZLES. YOUR PACE.</span>
           <button type="button" className="share-button" onClick={shareLounge}>
             <UiIcon name="share" /> INVITE A FRIEND
           </button>
@@ -457,10 +479,11 @@ function Lobby({
           </div>
           <ModePicker value={mode} onChange={setMode} />
           <DifficultyPicker mode={mode} value={difficulty} onChange={setDifficulty} />
+          <SessionStart saved={savedPractice} disabled={busy || Boolean(outgoing)} onPlay={onPractice} onResume={onResume} onHelp={onHelp} />
 
-          <div className="rivals-heading">
+          <div className="rivals-heading" id="rivals">
             <div>
-              <span className="section-kicker">02 · CHOOSE YOUR RIVAL</span>
+              <span className="section-kicker">OR · MAKE IT A RACE</span>
               <h2>IN THE LOUNGE</h2>
             </div>
             <span className="online-count">
@@ -497,7 +520,7 @@ function Lobby({
                 <OpponentCard
                   key={player.id}
                   player={player}
-                  busy={busy || Boolean(outgoing)}
+                  busy={busy || Boolean(outgoing) || !connection}
                   onChallenge={() => onChallenge(player.id)}
                 />
               ))
@@ -522,8 +545,9 @@ function Lobby({
         </section>
 
         <aside className="side-panel">
+          <DailyCard config={daily} records={records} disabled={busy || Boolean(outgoing)} onPlay={onDaily} now={now} />
           <div className="your-record">
-            <span className="section-kicker">YOUR RUN</span>
+            <span className="section-kicker">YOUR MULTIPLAYER RECORD</span>
             <div className="record-number">
               <strong>{snapshot.player.wins}</strong>
               <span>WINS</span>
@@ -562,11 +586,13 @@ function Lobby({
               </li></> : <><li><span>1</span><p><b>TAP</b> a tower to lift its top ring.</p></li><li><span>2</span><p><b>PLACE</b> it on an empty peg or a larger ring.</p></li><li><span>3</span><p><b>BUILD</b> the full tower on peg three first.</p></li></>}
             </ol>
             <div className="rule-stamp">
-              <UiIcon name="zap" /> NO HINTS. NO PAUSES. PURE RACE.
+              <UiIcon name="zap" /> HINTS IN SOLO. PURE SKILL IN RACES.
             </div>
           </div>
         </aside>
       </div>
+
+      <PersonalBests records={records} mode={mode} tier={difficulty} />
 
       <footer className="lobby-footer">
         <span>NO ACCOUNT. JUST RACE.</span>
@@ -606,6 +632,7 @@ function BoltSortBoardView({
 }) {
   return (
     <div
+      onKeyDown={mini ? undefined : (event) => boardKeys(event, boardColumns(board.length))}
       className={`bolt-sort-board${mini ? " mini-bolt-board" : ""}`}
       style={{ "--bolt-columns": boardColumns(board.length) } as React.CSSProperties}
       role={mini ? undefined : "group"}
@@ -725,7 +752,7 @@ function RaceResultDialog({
         <span className="result-icon">
           {won ? <UiIcon name="trophy" /> : <UiIcon name="swords" />}
         </span>
-        <span className="result-kicker">{match.practice ? "PRACTICE COMPLETE" : won ? (match.mode === "sort" ? "SORT SECURED" : "TOWER SECURED") : "RACE COMPLETE"}</span>
+        <span className="result-kicker">{match.practice ? (match.dailyDate ? "DAILY SORT COMPLETE" : "PRACTICE COMPLETE") : won ? (match.mode === "sort" ? "SORT SECURED" : "TOWER SECURED") : "RACE COMPLETE"}</span>
         <h2 id="result-title">
           {won ? (match.mode === "sort" ? "YOU SORTED IT!" : "YOU BUILT IT!") : `${match.opponent.name} GOT THERE FIRST`}
         </h2>
@@ -734,7 +761,7 @@ function RaceResultDialog({
             ? `A ${formatTime(elapsed)} finish in ${match.myMoves} moves.`
             : `You made ${match.myMoves} moves and reached ${myProgress}%.`}
         </p>
-        {match.practice ? <div className="practice-result-summary"><b>{formatTime(elapsed)}</b><span>{match.myMoves} MOVES</span></div> : <div className="result-score">
+        {match.practice ? <><div className="practice-result-summary"><b>{formatTime(elapsed)}</b><span>{match.myMoves} MOVES</span></div><p className="result-note">{match.assisted ? "Assisted finish. Keep practicing; personal bests use runs without hints or undo." : "Unassisted finish. Added to your personal records on this device."}</p></> : <div className="result-score">
           <div className={won ? "winner" : ""}>
             <Avatar player={snapshot.player} small />
             <span>YOU</span>
@@ -763,7 +790,7 @@ function RaceResultDialog({
                 ? match.opponentRematch
                   ? "STARTING…"
                   : "WAITING FOR RIVAL…"
-                : match.practice ? "TRY ANOTHER" : "RACE AGAIN"}
+                : match.practice ? (match.dailyDate ? "PLAY DAILY AGAIN" : "TRY ANOTHER") : "RACE AGAIN"}
             </button>
             <button type="button" className="secondary-result" onClick={onLeave} disabled={busy}>
               BACK TO LOUNGE
@@ -803,19 +830,20 @@ function HanoiBoardView({
   mini?: boolean;
 }) {
   return (
-    <div className={`hanoi-board${mini ? " mini-hanoi-board" : ""}`} role={mini ? undefined : "group"} aria-label={mini ? undefined : `${diskCount}-ring Tower of Hanoi board`} aria-hidden={mini || undefined}>
+    <div onKeyDown={mini ? undefined : (event) => boardKeys(event, 3)} className={`hanoi-board${mini ? " mini-hanoi-board" : ""}`} role={mini ? undefined : "group"} aria-label={mini ? undefined : `${diskCount}-ring Tower of Hanoi board`} aria-hidden={mini || undefined}>
       {board.map((peg, pegIndex) => {
         const contents = <><span className="hanoi-rod" /><span className="ring-stack">{peg.map((disk, index) => <span key={disk} className={`hanoi-ring ring-${disk}${selectedPeg === pegIndex && index === peg.length - 1 ? " lifted" : ""}`} style={{ width: `${32 + (disk / diskCount) * 64}%` }}><i>{disk}</i></span>)}</span><span className="hanoi-base" /></>;
         if (mini) return <span key={pegIndex} className="hanoi-peg">{contents}</span>;
-        return <button key={pegIndex} type="button" className={`hanoi-peg${selectedPeg === pegIndex ? " selected" : ""}${invalidPeg === pegIndex ? " invalid" : ""}`} disabled={!interactive} onClick={() => onPeg?.(pegIndex)} aria-pressed={selectedPeg === pegIndex} aria-label={`Tower ${pegIndex + 1}. ${peg.length ? `Bottom to top: ${peg.join(", ")}.` : "Empty."}`}>{contents}</button>;
+        return <button key={pegIndex} type="button" className={`hanoi-peg${selectedPeg === pegIndex ? " selected" : ""}${selectedPeg !== null && selectedPeg !== pegIndex && moveHanoiDisk(board, selectedPeg, pegIndex, diskCount).ok ? " legal-target" : ""}${invalidPeg === pegIndex ? " invalid" : ""}`} disabled={!interactive} onClick={() => onPeg?.(pegIndex)} aria-pressed={selectedPeg === pegIndex} aria-label={`Tower ${pegIndex + 1}${pegIndex === 2 ? ", goal" : ""}. ${peg.length ? `Bottom to top: ${peg.join(", ")}.` : "Empty."}`}>{contents}<span className="peg-label">{pegIndex === 2 ? "3 · GOAL" : `${pegIndex + 1}`}</span></button>;
       })}
     </div>
   );
 }
 
 function HanoiRace({
-  snapshot, now, selectedPeg, setSelectedPeg, busy, onMove, onReset, onLeave, onRematch, onToast,
+  snapshot, now, selectedPeg, setSelectedPeg, busy, onMove, onReset, onLeave, onRematch, onToast, practiceTools,
 }: {
+  practiceTools?: React.ReactNode;
   snapshot: Snapshot; now: number; selectedPeg: number | null; setSelectedPeg: (value: number | null) => void; busy: boolean; onMove: (from: number, to: number) => void; onReset: () => void; onLeave: () => void; onRematch: () => void; onToast: (message: string) => void;
 }) {
   const match = snapshot.match as HanoiMatch;
@@ -843,11 +871,12 @@ function HanoiRace({
 
   return <main className={`race-shell hanoi-race${match.practice ? " practice-race" : ""}`}>
     <header className="race-topbar"><button type="button" className="icon-button" onClick={onLeave} aria-label="Leave race"><UiIcon name="back" /></button><Brand /><div className="race-kind"><span>{match.diskCount} RINGS</span><b>PAR {match.par} MOVES</b></div></header>
-    {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>SOLO PRACTICE</span><b>LEARN THE PATTERN · NO STATS COUNTED</b></div></section> : <section className="opponent-strip"><div className="opponent-identity"><Avatar player={match.opponent} small /><div><span>YOUR RIVAL</span><strong>{match.opponent.name}</strong></div><i className={match.opponent.online ? "online" : "offline"}>{match.opponent.online ? "LIVE" : "RECONNECTING"}</i></div><div className="opponent-mini" role="img" aria-label={`Opponent tower, ${opponentProgress} percent complete`}><HanoiBoardView board={match.opponentBoard} diskCount={match.diskCount} selectedPeg={null} interactive={false} mini /></div><div className="opponent-stats"><strong>{opponentProgress}%</strong><span>{match.opponentMoves} MOVES</span></div></section>}
+    {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>{match.dailyDate ? "DAILY CHALLENGE" : "SOLO PRACTICE"}</span><b>{match.assisted ? "GUIDED RUN · KEEP EXPLORING" : "YOUR PACE · YOUR PERSONAL BEST"}</b></div></section> : <section className="opponent-strip"><div className="opponent-identity"><Avatar player={match.opponent} small /><div><span>YOUR RIVAL</span><strong>{match.opponent.name}</strong></div><i className={match.opponent.online ? "online" : "offline"}>{match.opponent.online ? "LIVE" : "RECONNECTING"}</i></div><div className="opponent-mini" role="img" aria-label={`Opponent tower, ${opponentProgress} percent complete`}><HanoiBoardView board={match.opponentBoard} diskCount={match.diskCount} selectedPeg={null} interactive={false} mini /></div><div className="opponent-stats"><strong>{opponentProgress}%</strong><span>{match.opponentMoves} MOVES</span></div></section>}
     <section className="race-stage"><div className="race-stats"><div><span>TIME</span><strong>{formatTime(elapsed)}</strong></div><div className="race-status-center"><span className="progress-track" role="progressbar" aria-label="Tower complete" aria-valuemin={0} aria-valuemax={100} aria-valuenow={myProgress}><i style={{ width: `${myProgress}%` }} /></span><b>{match.myBoard[2].length} / {match.diskCount} RINGS ON GOAL</b></div><div><span>MOVES</span><strong>{match.myMoves}</strong></div></div>
       <div className="board-wrap"><span className="you-badge">YOUR BOARD</span><HanoiBoardView board={match.myBoard} diskCount={match.diskCount} selectedPeg={selectedPeg} invalidPeg={invalidPeg} interactive={playable} onPeg={handlePeg} /></div>
       <div className="move-prompt" aria-live="polite"><span className={`prompt-icon${selectedPeg !== null ? " active" : ""}`}>{selectedPeg !== null ? <UiIcon name="check" /> : <span>1</span>}</span><div><b>{selectedPeg !== null ? "RING LIFTED" : "YOUR MOVE"}</b><span>{selectedPeg !== null ? "Tap an empty tower or a larger ring" : "Tap a tower to lift its top ring"}</span></div><div className="prompt-actions">{selectedPeg !== null ? <button type="button" onClick={() => setSelectedPeg(null)}>CANCEL</button> : null}<button type="button" onClick={() => { setSelectedPeg(null); onReset(); }} disabled={busy}>RESET</button></div></div>
     </section>
+    {!ended ? practiceTools : null}
     {countdown > 0 && !ended ? <div className="countdown-overlay" role="status" aria-live="assertive"><div className="countdown-card"><span>GET READY</span><strong key={countdown}>{countdown}</strong><p>Same tower. First perfect stack wins.</p></div></div> : null}
     {ended ? <RaceResultDialog snapshot={snapshot} match={match} elapsed={elapsed} myProgress={myProgress} busy={busy} onRematch={onRematch} onLeave={onLeave} /> : null}
   </main>;
@@ -864,7 +893,9 @@ function SortRace({
   onLeave,
   onRematch,
   onToast,
+  practiceTools,
 }: {
+  practiceTools?: React.ReactNode;
   snapshot: Snapshot;
   now: number;
   selectedBolt: number | null;
@@ -957,7 +988,7 @@ function SortRace({
         </div>
       </header>
 
-      {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>SOLO PRACTICE</span><b>TEST THE SCRAMBLE · RESET ANYTIME</b></div></section> : <section className="opponent-strip">
+      {match.practice ? <section className="practice-strip"><UiIcon name="zap" /><div><span>{match.dailyDate ? `DAILY SORT · ${match.dailyDate}` : "SOLO PRACTICE"}</span><b>{match.assisted ? "GUIDED RUN · KEEP EXPLORING" : "YOUR PACE · YOUR PERSONAL BEST"}</b></div></section> : <section className="opponent-strip">
         <div className="opponent-identity">
           <Avatar player={match.opponent} small />
           <div>
@@ -1034,7 +1065,7 @@ function SortRace({
             <b>{deadlocked ? "NO MOVES LEFT" : selectedBolt !== null ? `${selectedGroupSize} NUT${selectedGroupSize === 1 ? "" : "S"} LIFTED` : "YOUR MOVE"}</b>
             <span>
               {deadlocked
-                ? "Reset to the shared starting scramble"
+                ? match.practice ? "Undo your last move or reset the puzzle" : "Reset to the shared starting scramble"
                 : selectedBolt !== null
                 ? "Place the full matching group where it fits"
                 : "Tap any stack to lift its matching top group"}
@@ -1047,6 +1078,7 @@ function SortRace({
         </div>
       </section>
 
+      {!ended ? practiceTools : null}
       {countdown > 0 && !ended ? (
         <div className="countdown-overlay" role="status" aria-live="assertive">
           <div className="countdown-card">
@@ -1073,6 +1105,7 @@ function SortRace({
 }
 
 function Race(props: {
+  practiceTools?: React.ReactNode;
   snapshot: Snapshot;
   now: number;
   selectedBolt: number | null;
@@ -1096,6 +1129,7 @@ function Race(props: {
       onLeave={props.onLeave}
       onRematch={props.onRematch}
       onToast={props.onToast}
+      practiceTools={props.practiceTools}
     />
   ) : <SortRace {...props} />;
 }
@@ -1241,6 +1275,30 @@ function ConfirmLeaveDialog({
   );
 }
 
+function HelpDialog({ mode, onClose }: { mode: GameMode; onClose: () => void }) {
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose);
+  return <div className="sheet-backdrop"><div ref={dialogRef} className="name-dialog guide-dialog" role="dialog" aria-modal="true" aria-labelledby="guide-title" tabIndex={-1}>
+    <button className="close-button" type="button" onClick={onClose} aria-label="Close rules">×</button>
+    <span className="section-kicker">A QUICK FIELD GUIDE</span>
+    <h2 id="guide-title">{mode === "sort" ? "NUTS & BOLTS" : "TOWER OF HANOI"}</h2>
+    <p>{mode === "sort" ? "Sort each color onto its own bolt. A complete stack of four locks into place." : "Move the whole tower to peg 3. The challenge is finding the right order."}</p>
+    <ol className="guide-steps">
+      <li><b>Choose a stack.</b> {mode === "sort" ? "You lift all matching nuts at the top together." : "Only the top ring can move."}</li>
+      <li><b>Choose a destination.</b> {mode === "sort" ? "It must be empty or have the same color on top, with room for the whole group." : "Use an empty peg or put the ring on a larger one."}</li>
+      <li><b>Give yourself space.</b> {mode === "sort" ? "Keep a spare bolt open. Filling both spares too early can leave you stuck." : "Move the smaller rings aside before moving a larger ring to the goal."}</li>
+    </ol>
+    <div className="guide-tip"><b>SOLO IS YOUR WORKSHOP</b><p>Undo a move, ask for a hint, or pause and return later. Hints and undo mark a run as assisted. Multiplayer races have no assists or pauses.</p></div>
+    <p className="keyboard-note"><b>Keyboard:</b> Tab to the board, use arrow keys to move between stacks, then Enter or Space to pick up and place. Numbers on pieces help distinguish colors.</p>
+    <button type="button" className="save-name" onClick={onClose}>GOT IT. LET’S PLAY.</button>
+  </div></div>;
+}
+
+function savedSession(session: PracticeSession): SavedPractice {
+  const match = session.snapshot.match!;
+  return { version: 1, config: session.config, board: clonePracticeBoard(match.myBoard), moves: match.myMoves,
+    elapsed: Math.max(0, Date.now() - match.startsAt), assisted: Boolean(match.assisted), history: session.history };
+}
+
 function clonePracticeBoard(board: BoltSortBoard | HanoiBoard): BoltSortBoard | HanoiBoard {
   return board.map((stack) => [...stack]) as BoltSortBoard | HanoiBoard;
 }
@@ -1249,6 +1307,7 @@ function createPracticeSession(
   player: Player,
   mode: GameMode,
   tier: BoltSortTierId | HanoiTierId,
+  config: PracticeConfig = { mode, tier, seed: `practice:${crypto.randomUUID()}` },
 ): PracticeSession {
   const now = Date.now();
   const opponent = {
@@ -1264,7 +1323,7 @@ function createPracticeSession(
   if (mode === "sort") {
     const puzzle = createBoltSortPuzzle(
       tier as BoltSortTierId,
-      `practice:${crypto.randomUUID()}`,
+      config.seed,
     );
     initialBoard = puzzle.board;
     match = {
@@ -1285,6 +1344,8 @@ function createPracticeSession(
       opponentRematch: false,
       opponent,
       practice: true,
+      dailyDate: config.dailyDate,
+      assisted: false,
     };
   } else {
     const level = HANOI_LEVELS[tier as HanoiTierId];
@@ -1309,10 +1370,14 @@ function createPracticeSession(
       opponentRematch: false,
       opponent,
       practice: true,
+      dailyDate: config.dailyDate,
+      assisted: false,
     };
   }
   return {
     initialBoard: clonePracticeBoard(initialBoard),
+    config,
+    history: [],
     snapshot: {
       serverNow: now,
       player,
@@ -1328,10 +1393,11 @@ export function GameApp() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [mode, setMode] = useState<GameMode>("sort");
-  const [sortDifficulty, setSortDifficulty] = useState<BoltSortTierId>("endurance");
+  const [sortDifficulty, setSortDifficulty] = useState<BoltSortTierId>("quick");
   const [hanoiDifficulty, setHanoiDifficulty] = useState<HanoiTierId>("classic");
   const [busy, setBusy] = useState(false);
   const [moveReconciling, setMoveReconciling] = useState(false);
+  const [resetPending, setResetPending] = useState(false);
   const [selectedBolt, setSelectedBolt] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -1339,6 +1405,14 @@ export function GameApp() {
   const [practice, setPractice] = useState<PracticeSession | null>(null);
   const [practiceNow, setPracticeNow] = useState(0);
   const [clockNow, setClockNow] = useState(0);
+  const [savedPractice, setSavedPractice] = useState<SavedPractice | null>(null);
+  const [records, setRecords] = useState<PracticeRecord[]>([]);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [hintText, setHintText] = useState<string | null>(null);
+  const [connected, setConnected] = useState(true);
+  const [todayNow, setTodayNow] = useState(0);
+  const [storageAvailable, setStorageAvailable] = useState(true);
+  const [storageReady, setStorageReady] = useState(false);
   const snapshotRef = useRef<Snapshot | null>(null);
   const busyRef = useRef(false);
   const requestSequenceRef = useRef(0);
@@ -1355,11 +1429,9 @@ export function GameApp() {
       setConfirmingLeave(false);
       setMoveReconciling(false);
     }
-    if (next.incoming.length) setEditingName(false);
+    if (next.incoming.length) { setEditingName(false); setHelpOpen(false); }
     if (next.match) setPractice(null);
     snapshotRef.current = next;
-    clockOffsetRef.current = next.serverNow - Date.now();
-    setClockNow(next.serverNow);
     setSnapshot(next);
   }, []);
 
@@ -1372,6 +1444,10 @@ export function GameApp() {
         return false;
       }
       appliedSequenceRef.current = sequence;
+      clockOffsetRef.current = next.serverNow - Date.now();
+      setClockNow(next.serverNow);
+      setConnected(true);
+      setMoveReconciling(false);
       applySnapshot(next);
       return true;
     },
@@ -1448,9 +1524,8 @@ export function GameApp() {
           try {
             applyNetworkSnapshot(await gameRequest("sync"), syncSequence);
           } catch {
+            setConnected(false);
             showToast("Connection interrupted. Reconnecting…");
-          } finally {
-            setMoveReconciling(false);
           }
           break;
         }
@@ -1504,7 +1579,7 @@ export function GameApp() {
         try {
           applyNetworkSnapshot(await gameRequest("sync"), sequence);
         } catch {
-          // Presence is best effort; the next scheduled poll retries.
+          setConnected(false);
         }
       }
       timeout = setTimeout(poll, document.visibilityState === "visible" ? delay : 6_000);
@@ -1543,7 +1618,61 @@ export function GameApp() {
     };
   }, []);
 
-  if (!snapshot) {
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+    if (cancelled) return;
+    setTodayNow(Date.now());
+    try {
+      setSavedPractice(parsePracticeSave(localStorage.getItem(PRACTICE_SAVE_KEY)));
+      setRecords(parsePracticeRecords(localStorage.getItem(PRACTICE_RECORDS_KEY)));
+      const preferences = JSON.parse(localStorage.getItem("stack-rush:preferences:v1") ?? "null");
+      if (preferences?.mode === "sort" || preferences?.mode === "hanoi") setMode(preferences.mode);
+      if (Object.hasOwn(BOLT_SORT_TIERS, preferences?.sort ?? "")) setSortDifficulty(preferences.sort);
+      if (Object.hasOwn(HANOI_LEVELS, preferences?.hanoi ?? "")) setHanoiDifficulty(preferences.hanoi);
+    } catch { setStorageAvailable(false); }
+    setStorageReady(true);
+    });
+    const timer = setInterval(() => setTodayNow(Date.now()), 30_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    try {
+      localStorage.setItem(PRACTICE_RECORDS_KEY, JSON.stringify(records));
+      localStorage.setItem("stack-rush:preferences:v1", JSON.stringify({ mode, sort: sortDifficulty, hanoi: hanoiDifficulty }));
+    } catch { queueMicrotask(() => setStorageAvailable(false)); }
+  }, [records, mode, sortDifficulty, hanoiDifficulty, storageReady]);
+
+  useEffect(() => {
+    const match = practice?.snapshot.match;
+    if (!practice || !match) return;
+    let cancelled = false;
+    if (match.status === "finished") {
+      queueMicrotask(() => {
+      if (cancelled) return;
+      const record: PracticeRecord = { id: match.id, mode: match.mode, tier: match.tier, moves: match.myMoves,
+        elapsed: Math.max(0, (match.finishedAt ?? Date.now()) - match.startsAt), completedAt: match.finishedAt ?? Date.now(),
+        assisted: Boolean(match.assisted), dailyDate: match.dailyDate };
+      setRecords((current) => [record, ...current.filter((item) => item.id !== record.id)].slice(0, 100));
+      setSavedPractice(null);
+      try { localStorage.removeItem(PRACTICE_SAVE_KEY); } catch { setStorageAvailable(false); }
+      });
+      return () => { cancelled = true; };
+    }
+    const save = () => {
+      const saved = savedSession(practice);
+      setSavedPractice(saved);
+      try { localStorage.setItem(PRACTICE_SAVE_KEY, JSON.stringify(saved)); } catch { setStorageAvailable(false); }
+    };
+    queueMicrotask(() => { if (!cancelled) save(); });
+    window.addEventListener("pagehide", save);
+    document.addEventListener("visibilitychange", save);
+    return () => { cancelled = true; window.removeEventListener("pagehide", save); document.removeEventListener("visibilitychange", save); };
+  }, [practice]);
+
+  if (!snapshot || !storageReady) {
     return (
       <main className="loading-screen">
         <Brand />
@@ -1613,7 +1742,7 @@ export function GameApp() {
   };
 
   const resetCurrentBoard = async () => {
-    setMoveReconciling(true);
+    setResetPending(true);
     try {
       for (let attempt = 0; attempt < 80; attempt += 1) {
         if (!moveSendingRef.current && moveQueueRef.current.length === 0) break;
@@ -1625,12 +1754,13 @@ export function GameApp() {
       }
       const match = snapshotRef.current?.match;
       if (!match) return;
-      await sendAction("reset", {
+      const next = await sendAction("reset", {
         matchId: match.id,
         expectedMoves: match.myMoves,
       });
+      if (!next) setMoveReconciling(true);
     } finally {
-      setMoveReconciling(false);
+      setResetPending(false);
     }
   };
 
@@ -1640,14 +1770,61 @@ export function GameApp() {
   const beginPractice = (
     practiceMode: GameMode = mode,
     practiceTier: BoltSortTierId | HanoiTierId = difficulty,
+    config?: PracticeConfig,
   ) => {
     setSelectedBolt(null);
-    const session = createPracticeSession(snapshot.player, practiceMode, practiceTier);
+    setHintText(null);
+    const session = createPracticeSession(snapshot.player, practiceMode, practiceTier, config);
     setPracticeNow(session.snapshot.serverNow);
     setPractice(session);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
+  const resumePractice = () => {
+    if (!savedPractice) return;
+    const { config, board, moves, elapsed, history, assisted } = savedPractice;
+    const session = createPracticeSession(snapshot.player, config.mode, config.tier, config);
+    session.snapshot.match = { ...session.snapshot.match!, myBoard: clonePracticeBoard(board), myMoves: moves,
+      startsAt: Date.now() - elapsed, status: "playing", assisted } as Match;
+    session.history = history;
+    setSelectedBolt(null); setHintText(null); setPracticeNow(Date.now()); setPractice(session);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
+  const pausePractice = () => {
+    if (practice && practice.snapshot.match?.status !== "finished") {
+      const saved = savedSession(practice);
+      setSavedPractice(saved);
+      try { localStorage.setItem(PRACTICE_SAVE_KEY, JSON.stringify(saved)); } catch { setStorageAvailable(false); }
+    }
+    setSelectedBolt(null); setHintText(null); setPractice(null);
+  };
+
+  const undoPractice = () => {
+    setSelectedBolt(null); setHintText(null);
+    setPractice((current) => {
+      const match = current?.snapshot.match;
+      if (!current || !match || match.status === "finished" || !current.history.length) return current;
+      return { ...current, history: current.history.slice(0, -1), snapshot: { ...current.snapshot,
+        match: { ...match, myBoard: clonePracticeBoard(current.history.at(-1)!), myMoves: match.myMoves - 1, assisted: true } as Match } };
+    });
+  };
+
+  const hintPractice = () => {
+    const match = practice?.snapshot.match;
+    if (!practice || !match || match.status === "finished") return;
+    const hint = match.mode === "hanoi" ? hanoiHint(match.myBoard, match.diskCount) : sortPracticeHint(practice.config, match.myBoard);
+    if (hint) {
+      setSelectedBolt(hint.from);
+      setHintText(`Move ${match.mode === "sort" ? "the top group" : "the top ring"} from ${hint.from + 1} to ${hint.to + 1}.`);
+      setPractice({ ...practice, snapshot: { ...practice.snapshot, match: { ...match, assisted: true } } });
+    } else {
+      setHintText("You’ve taken a different route. Undo to return to the guided path, or reset this puzzle for step-by-step hints.");
+    }
   };
 
   const movePractice = (from: number, to: number) => {
+    setHintText(null);
     setPractice((current) => {
       const match = current?.snapshot.match;
       if (!current || !match || match.status === "finished") return current;
@@ -1658,6 +1835,7 @@ export function GameApp() {
         const solved = isBoltSortSolved(result.board, match.colorCount);
         return {
           ...current,
+          history: [...current.history, clonePracticeBoard(match.myBoard)].slice(-200),
           snapshot: {
             ...current.snapshot,
             serverNow: now,
@@ -1677,6 +1855,7 @@ export function GameApp() {
       const solved = isHanoiSolved(result.board, match.diskCount);
       return {
         ...current,
+        history: [...current.history, clonePracticeBoard(match.myBoard)].slice(-200),
         snapshot: {
           ...current.snapshot,
           serverNow: now,
@@ -1695,17 +1874,21 @@ export function GameApp() {
 
   const resetPractice = () => {
     setSelectedBolt(null);
+    setHintText(null);
     setPractice((current) => {
       const match = current?.snapshot.match;
       if (!current || !match) return current;
       const now = Date.now();
       return {
         ...current,
+        history: [],
         snapshot: {
           ...current.snapshot,
           serverNow: now,
           match: {
             ...match,
+            id: `practice:${crypto.randomUUID()}`,
+            assisted: false,
             status: "playing",
             startsAt: now,
             finishedAt: null,
@@ -1723,6 +1906,10 @@ export function GameApp() {
     <>
       {practice ? (
         <Race
+          practiceTools={<div className="practice-tools">
+            <div className="practice-tool-buttons"><button type="button" onClick={undoPractice} disabled={!practice.history.length || practiceNow < practice.snapshot.match!.startsAt}>↶ UNDO</button><button type="button" onClick={hintPractice} disabled={practiceNow < practice.snapshot.match!.startsAt}>? HINT</button><button type="button" onClick={pausePractice}>Ⅱ PAUSE & SAVE</button></div>
+            {hintText ? <p role="status">{hintText}</p> : <small>Hints follow a guided route. Undo is available for your last 200 moves.</small>}
+          </div>}
           snapshot={practice.snapshot}
           now={practiceNow}
           selectedBolt={selectedBolt}
@@ -1730,13 +1917,10 @@ export function GameApp() {
           busy={false}
           onMove={movePractice}
           onReset={resetPractice}
-          onLeave={() => {
-            setSelectedBolt(null);
-            setPractice(null);
-          }}
+          onLeave={pausePractice}
           onRematch={() => {
             const match = practice.snapshot.match!;
-            beginPractice(match.mode, match.tier);
+            beginPractice(match.mode, match.tier, practice.config.dailyDate ? practice.config : undefined);
           }}
           onToast={showToast}
         />
@@ -1746,7 +1930,7 @@ export function GameApp() {
           now={clockNow}
           selectedBolt={selectedBolt}
           setSelectedBolt={setSelectedBolt}
-          busy={busy || moveReconciling}
+          busy={busy || moveReconciling || resetPending}
           onMove={handleMove}
           onReset={() => void resetCurrentBoard()}
           onLeave={() => {
@@ -1760,6 +1944,9 @@ export function GameApp() {
         />
       ) : (
         <Lobby
+          savedPractice={savedPractice} records={records} daily={dailyChallenge(todayNow)}
+          onDaily={() => { const config = dailyChallenge(); beginPractice(config.mode, config.tier, config); }}
+          onResume={resumePractice} onHelp={() => setHelpOpen(true)} connection={connected} now={todayNow}
           snapshot={snapshot}
           mode={mode}
           setMode={setMode}
@@ -1779,7 +1966,13 @@ export function GameApp() {
         />
       )}
 
-      {!snapshot.match && snapshot.incoming[0] ? (
+      {practice && practice.snapshot.match?.status !== "finished" && !snapshot.match && snapshot.incoming[0] ? <div className="practice-invite" role="status">
+        <span><b>{snapshot.incoming[0].player.name} wants to race.</b><small>Your solo puzzle will be saved.</small></span>
+        <button type="button" disabled={busy} onClick={() => void sendAction("respond", { inviteId: snapshot.incoming[0].id, response: "decline" })}>DECLINE</button>
+        <button type="button" disabled={busy} onClick={() => { pausePractice(); void sendAction("respond", { inviteId: snapshot.incoming[0].id, response: "accept" }); }}>RACE</button>
+      </div> : null}
+
+      {!practice && !helpOpen && !snapshot.match && snapshot.incoming[0] ? (
         <InviteSheet
           invite={snapshot.incoming[0]}
           busy={busy}
@@ -1798,7 +1991,7 @@ export function GameApp() {
         />
       ) : null}
 
-      {!practice && editingName && !snapshot.incoming[0] ? (
+      {!practice && !helpOpen && editingName && !snapshot.incoming[0] ? (
         <NameDialog
           player={snapshot.player}
           busy={busy}
@@ -1821,6 +2014,9 @@ export function GameApp() {
         />
       ) : null}
 
+      {helpOpen && !practice && !snapshot.match ? <HelpDialog mode={mode} onClose={() => setHelpOpen(false)} /> : null}
+      {!connected && snapshot.match && !practice ? <div className="connection-banner" role="status">Connection interrupted. Reconnecting to your race…</div> : null}
+      {!storageAvailable && !snapshot.match && !practice ? <p className="storage-notice" role="status">Device storage is unavailable. Your progress will stay available while this page is open.</p> : null}
       {toast ? <div className="toast" role="status">{toast}</div> : null}
     </>
   );

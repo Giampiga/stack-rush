@@ -37,7 +37,7 @@ test("starter preview assets and dependencies are fully removed", async () => {
   assert.match(layout, /Stack Rush/);
   assert.match(gameApp, /NUTS &amp; BOLTS/);
   assert.match(gameApp, /TOWER OF HANOI/);
-  assert.match(gameApp, /PRACTICE SOLO/);
+  assert.match(gameApp, /SOLO PRACTICE/);
   assert.match(gameApp, /matching top group/);
   assert.match(gameApp, />RESET</);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

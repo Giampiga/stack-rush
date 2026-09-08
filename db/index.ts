@@ -180,12 +180,16 @@ export async function ensureDatabase(): Promise<D1Database> {
 
   if (readyForDatabase !== database || !schemaPromise) {
     readyForDatabase = database;
-    schemaPromise = database
+    const pending = database
       .batch(SCHEMA_STATEMENTS.map((statement) => database.prepare(statement)))
       .then(async () => {
         await applyMigrations(database);
         await database.prepare("PRAGMA optimize").run();
       });
+    schemaPromise = pending;
+    void pending.catch(() => {
+      if (schemaPromise === pending) schemaPromise = null;
+    });
   }
 
   await schemaPromise;

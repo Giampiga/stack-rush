@@ -27,5 +27,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "app/api/game/route 2.ts", "lib/hanoi 2.ts"]
 }
