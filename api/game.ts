@@ -28,10 +28,12 @@ export default {
     let offset = 0;
     for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
     const headers = new Headers({ "Content-Type": "application/json", Origin: upstreamOrigin });
-    for (const name of ["cookie", "user-agent", "accept-language"]) {
+    for (const name of ["user-agent", "accept-language"]) {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);
     }
+    const guestCookie = request.headers.get("cookie")?.split(";").map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith("peg_rush_guest="));
+    if (guestCookie) headers.set("Cookie", guestCookie);
     // ponytail: guest creation limits share proxy egress; use authenticated client-IP forwarding if traffic requires it.
     try {
       const upstream = await fetch(`${upstreamOrigin}/api/game`, {
@@ -41,7 +43,7 @@ export default {
         return failure(502, "SERVICE_UNAVAILABLE", "The game service is reconnecting. Try again shortly.");
       }
       const responseHeaders = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
-      const cookie = upstream.headers.get("set-cookie");
+      const cookie = upstream.headers.getSetCookie().find((value) => value.startsWith("peg_rush_guest="));
       if (cookie) responseHeaders.set("Set-Cookie", cookie);
       return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
     } catch {

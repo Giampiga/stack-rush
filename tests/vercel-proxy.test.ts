@@ -12,17 +12,21 @@ test("Vercel bridge protects origins and size, forwards guest cookies, and handl
     assert.equal(url, "https://peg-rush-hanoi.gga.chatgpt.site/api/game");
     const headers = new Headers(options?.headers);
     assert.equal(headers.get("origin"), "https://peg-rush-hanoi.gga.chatgpt.site");
-    assert.equal(headers.get("cookie"), "guest=test");
-    return Response.json({ ok: true }, { headers: { "Set-Cookie": "guest=new; Path=/; HttpOnly; SameSite=Lax; Secure" } });
+    assert.equal(headers.get("cookie"), "peg_rush_guest=test");
+    const response = Response.json({ ok: true });
+    response.headers.append("Set-Cookie", "platform=unrelated; Path=/");
+    response.headers.append("Set-Cookie", "peg_rush_guest=new; Path=/; HttpOnly; SameSite=Lax; Secure");
+    return response;
   };
   try {
     assert.equal((await proxy.fetch(request({ Origin: "https://other.example" }))).status, 403);
     assert.equal((await proxy.fetch(request({ "Sec-Fetch-Site": "cross-site" }))).status, 403);
     assert.equal((await proxy.fetch(request({}, "x".repeat(4097)))).status, 413);
     assert.equal(calls, 0);
-    const result = await proxy.fetch(request({ Origin: "https://stack-rush.vercel.app", Cookie: "guest=test" }));
+    const result = await proxy.fetch(request({ Origin: "https://stack-rush.vercel.app", Cookie: "platform=private; peg_rush_guest=test" }));
     assert.equal(result.status, 200);
-    assert.match(result.headers.get("set-cookie")!, /guest=new/);
+    assert.match(result.headers.get("set-cookie")!, /^peg_rush_guest=new/);
+    assert.equal(result.headers.getSetCookie().length, 1);
     assert.equal(result.headers.get("cache-control"), "no-store");
     globalThis.fetch = async () => new Response("Service unavailable", { status: 500 });
     assert.equal((await proxy.fetch(request())).status, 502);
