@@ -1082,34 +1082,21 @@ input:focus-visible {
   position: relative;
   z-index: 2;
   display: inline-flex;
-  width: 17px;
-  height: 17px;
+  width: 21px;
+  height: 21px;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid rgba(22,37,35,.66);
+  border: 1px solid var(--ink);
   border-radius: 50%;
-  background: rgba(255,255,255,.58);
+  background: #fffdf7;
   color: var(--ink);
-  font-size: 7px;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 15px;
+  line-height: 1;
   font-style: normal;
   font-weight: 950;
 }
 
-.game-nut.nut-0 { background: #ff8066; }
-.game-nut.nut-1 { background: #ff9a3d; }
-.game-nut.nut-2 { background: #efad32; }
-.game-nut.nut-3 { background: #ffe35a; }
-.game-nut.nut-4 { background: #c9f45b; }
-.game-nut.nut-5 { background: #52c878; }
-.game-nut.nut-6 { background: #35b8a0; }
-.game-nut.nut-7 { background: #25bdd1; }
-.game-nut.nut-8 { background: #58cfe0; }
-.game-nut.nut-9 { background: #4f83ed; }
-.game-nut.nut-10 { background: #7669e8; }
-.game-nut.nut-11 { background: #9a6ce6; }
-.game-nut.nut-12 { background: #d961cf; }
-.game-nut.nut-13 { background: #f277b7; }
-.game-nut.nut-14 { background: #dd4f79; }
 .game-nut.lifted { z-index: 8; filter: saturate(1.15) drop-shadow(0 8px 5px rgba(22,37,35,.24)); transform: translateY(-14px) scale(1.045); }
 
 .bolt-base {
@@ -1347,7 +1334,7 @@ input:focus-visible {
     box-shadow: inset 0 -4px rgba(0,0,0,.14), inset 0 2px rgba(255,255,255,.32), 0 2px 0 var(--ink);
   }
   .game-nut::before { top: 2px; height: 2px; }
-  .game-nut i { width: 12px; height: 12px; border-width: 1px; font-size: 6px; }
+  .game-nut i { width: 15px; height: 15px; font-size: 11px; }
   .bolt-rod { bottom: 9px; width: 7px; height: var(--compact-pole-height, 64px); }
   .nut-stack { bottom: 10px; }
   .bolt-base { bottom: 1px; height: 9px; }

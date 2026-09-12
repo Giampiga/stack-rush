@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BOLT_CAPACITY,
-  BOLT_COLORS,
   BOLT_SORT_TIERS,
   boltSortProgress,
   createBoltSortPuzzle,
@@ -602,9 +601,24 @@ function Lobby({
   );
 }
 
-function nutIndex(nut: BoltColor) {
-  return BOLT_COLORS.indexOf(nut);
-}
+// Display colors are independent of the saved puzzle IDs; Quick gets six distinct hues.
+const NUT_STYLES = {
+  coral: { color: "#f06455", emoji: "🍎", label: "red apple" },
+  orange: { color: "#3979d6", emoji: "💧", label: "blue drop" },
+  amber: { color: "#f2d343", emoji: "⭐", label: "yellow star" },
+  lemon: { color: "#9566c9", emoji: "🍇", label: "purple grapes" },
+  lime: { color: "#48af70", emoji: "🍀", label: "green clover" },
+  emerald: { color: "#eb85b5", emoji: "🌸", label: "pink flower" },
+  teal: { color: "#f49c45", emoji: "🔥", label: "orange fire" },
+  cyan: { color: "#55cddd", emoji: "🐟", label: "cyan fish" },
+  sky: { color: "#ac7754", emoji: "🐻", label: "brown bear" },
+  cobalt: { color: "#afe0b5", emoji: "🌵", label: "mint cactus" },
+  violet: { color: "#c0afeb", emoji: "🦋", label: "lavender butterfly" },
+  purple: { color: "#354f89", emoji: "🌙", label: "navy moon" },
+  magenta: { color: "#f0daba", emoji: "⚽", label: "cream soccer ball" },
+  rose: { color: "#a1afbc", emoji: "🔑", label: "gray key" },
+  berry: { color: "#963d5d", emoji: "🍄", label: "burgundy mushroom" },
+} satisfies Record<BoltColor, { color: string; emoji: string; label: string }>;
 
 function boardColumns(boltCount: number) {
   if (boltCount <= 8) return 4;
@@ -652,7 +666,7 @@ function BoltSortBoardView({
         }${locked ? " locked" : ""}${invalidBolt === boltIndex ? " invalid" : ""}`;
         const stackSummary = bolt.length
           ? `Bottom to top: ${bolt
-              .map((nut) => `${nut}, marker ${nutIndex(nut) + 1}`)
+              .map((nut) => NUT_STYLES[nut].label)
               .join(", ")}.`
           : "Empty.";
         const contents = (
@@ -660,17 +674,18 @@ function BoltSortBoardView({
             <span className="bolt-rod" />
             <span className="nut-stack">
               {bolt.map((nut, index) => {
-                const color = nutIndex(nut);
+                const style = NUT_STYLES[nut];
                 return (
                   <span
                     key={`${nut}-${index}`}
-                    className={`game-nut nut-${color}${
+                    className={`game-nut${
                       selectedBolt === boltIndex && index >= bolt.length - groupSize
                         ? " lifted"
                         : ""
                     }`}
+                    style={{ backgroundColor: style.color }}
                   >
-                    <i>{color + 1}</i>
+                    <i aria-hidden="true">{style.emoji}</i>
                   </span>
                 );
               })}
@@ -704,7 +719,7 @@ function BoltSortBoardView({
             aria-pressed={selectedBolt === boltIndex}
             aria-label={`Bolt ${boltIndex + 1} of ${board.length}. ${stackSummary} ${
               topNut
-                ? `Top group ${groupSize} ${topNut} nut${groupSize === 1 ? "" : "s"}, marker ${nutIndex(topNut) + 1}.`
+                ? `Top group ${groupSize} ${NUT_STYLES[topNut].label} nut${groupSize === 1 ? "" : "s"}.`
                 : ""
             } ${bolt.length} of ${BOLT_CAPACITY} spaces filled.${
               locked ? " Sorted and locked." : ""
@@ -1067,7 +1082,7 @@ function SortRace({
               {deadlocked
                 ? match.practice ? "Undo your last move or reset the puzzle" : "Reset to the shared starting scramble"
                 : selectedBolt !== null
-                ? "Place the full matching group where it fits"
+                ? "Match the emoji on top, or use an empty bolt"
                 : "Tap any stack to lift its matching top group"}
             </span>
           </div>
@@ -1284,11 +1299,11 @@ function HelpDialog({ mode, onClose }: { mode: GameMode; onClose: () => void }) 
     <p>{mode === "sort" ? "Sort each color onto its own bolt. A complete stack of four locks into place." : "Move the whole tower to peg 3. The challenge is finding the right order."}</p>
     <ol className="guide-steps">
       <li><b>Choose a stack.</b> {mode === "sort" ? "You lift all matching nuts at the top together." : "Only the top ring can move."}</li>
-      <li><b>Choose a destination.</b> {mode === "sort" ? "It must be empty or have the same color on top, with room for the whole group." : "Use an empty peg or put the ring on a larger one."}</li>
+      <li><b>Choose a destination.</b> {mode === "sort" ? "It must be empty or have the same color and emoji on top, with room for the whole group." : "Use an empty peg or put the ring on a larger one."}</li>
       <li><b>Give yourself space.</b> {mode === "sort" ? "Keep a spare bolt open. Filling both spares too early can leave you stuck." : "Move the smaller rings aside before moving a larger ring to the goal."}</li>
     </ol>
     <div className="guide-tip"><b>SOLO IS YOUR WORKSHOP</b><p>Undo a move, ask for a hint, or pause and return later. Hints and undo mark a run as assisted. Multiplayer races have no assists or pauses.</p></div>
-    <p className="keyboard-note"><b>Keyboard:</b> Tab to the board, use arrow keys to move between stacks, then Enter or Space to pick up and place. Numbers on pieces help distinguish colors.</p>
+    <p className="keyboard-note"><b>Keyboard:</b> Tab to the board, use arrow keys to move between stacks, then Enter or Space to pick up and place. {mode === "sort" ? "Each color has its own emoji, so you can match by either cue." : "Numbers on rings show their size."}</p>
     <button type="button" className="save-name" onClick={onClose}>GOT IT. LET’S PLAY.</button>
   </div></div>;
 }
