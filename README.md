@@ -166,7 +166,7 @@ Wrangler configuration.
 | `npm run build` | Build the Vinext/Cloudflare Worker application. |
 | `npm start` | Serve the built Worker locally. |
 | `npm test` | Unit tests, build, then rendered product-shell verification. |
-| `npm run test:unit` | Puzzle-engine and timer tests only. |
+| `npm run test:unit` | Puzzle-engine, practice, timer, and API bridge tests. |
 | `npm run test:multiplayer` | Two isolated anonymous clients exercise multiplayer flows. |
 | `npm run qa:opponent` | Run a 90-second scripted local opponent for hands-on QA. |
 | `npm run qa:challenger` | Have the QA client challenge a guest named `Mobile Racer`. |
